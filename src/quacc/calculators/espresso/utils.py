@@ -313,13 +313,9 @@ def prepare_copy_files(parameters: dict[str, Any], binary: str = "pw") -> list[P
 
     elif binary == "matdyn":
         to_copy.append(Path("q2r.fc*"))
-        if input_data.get("input", {}).get("la2f", False):
-            to_copy.append(Path("elph_dir"))
 
     elif binary == "q2r":
         to_copy.append(Path("matdyn*"))
-        if input_data.get("input", {}).get("la2f", False):
-            to_copy.append(Path("elph_dir"))
 
     elif binary == "dvscf_q2r":
         to_copy.extend(pw_base)

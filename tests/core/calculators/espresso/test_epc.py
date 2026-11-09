@@ -1,4 +1,4 @@
-"""Offline EPC regression against preserved QE7.5 MgB2 q4 spectra."""
+"""Offline EPC regression against preserved QE7.5 one-atom Pb spectra."""
 
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ DATA = Path(__file__).parent / "epc_data"
 
 
 @pytest.mark.parametrize("mu_star", [0.10, 0.13, 0.15])
-def test_mgb2_spectrum_regression(mu_star: float) -> None:
+def test_pb_spectrum_regression(mu_star: float) -> None:
     """One complete spectrum retains the physical quadrature regression."""
-    spectrum = analyze_a2f(read_a2f(DATA / "a2F.dos5.gz"), mu_stars=(mu_star,))
+    spectrum = analyze_a2f(read_a2f(DATA / "a2F.dos1.gz"), mu_stars=(mu_star,))
     expected = next(
         row
         for row in json.loads((DATA / "expected.json").read_text())
@@ -43,27 +43,33 @@ def test_mgb2_spectrum_regression(mu_star: float) -> None:
         "modified_mcmillan_omega_log",
         "allen_dynes_f1_f2",
     ]
-    assert len(spectrum["mode_indices"]) == 9
-    assert np.min(spectrum["alpha2F"]) < 0
-    assert "negative_spectral_weight" in spectrum["diagnostics"]
-    assert spectrum["mode_sum_max_abs_error"] < 1e-5
+    assert len(spectrum["mode_indices"]) == 3
+    assert spectrum["lambda"] > 5
+    assert "large_lambda_formula_regime" in spectrum["warnings"]
+    assert abs(spectrum["qe_midpoint_footer_difference"]) < 1e-3
+    # Independent E16.6 rounding of every column: sum their absolute error bounds,
+    # including signed cancellation, rather than imposing a physical mismatch.
+    modes = np.asarray(spectrum["alpha2F_modes"])
+    total = np.asarray(spectrum["alpha2F"])
+    rounding_bound = 5e-6 * (abs(total) + np.sum(abs(modes), axis=1)) + 1e-12
+    assert np.all(abs(modes.sum(axis=1) - total) <= rounding_bound)
     assert json.loads(json.dumps(spectrum, allow_nan=False)) == spectrum
 
 
 def test_native_frequency_and_dos_excerpts() -> None:
     frequencies = read_matdyn_frequencies(DATA / "matdyn.freq")
-    assert frequencies["number_of_modes"] == 9
+    assert frequencies["number_of_modes"] == 3
     assert frequencies["number_of_qpoints"] == 2
-    assert frequencies["weights"] == [0.000031, 0.000061]
-    assert frequencies["frequencies"][0][-1] == 698.8808
+    assert frequencies["weights"] == [0.001953, 0.015625]
+    assert frequencies["frequencies"][0][-1] == 0.0
     dos = read_phonon_dos(DATA / "matdyn.dos")
     assert dos["frequency_unit"] == "cm^-1"
-    assert np.shape(dos["atom_projected_dos"]) == (3, 3)
-    assert dos["total_dos"][1] == pytest.approx(3.5855890226e-8)
+    assert np.shape(dos["atom_projected_dos"]) == (3, 1)
+    assert dos["total_dos"][1] == pytest.approx(6.1326590894e-05)
 
 
 def test_frequency_units(tmp_path: Path) -> None:
-    raw = read_a2f(DATA / "a2F.dos5.gz")
+    raw = read_a2f(DATA / "a2F.dos1.gz")
     baseline = analyze_a2f(raw)
     ry_ev = physical_constants["Rydberg constant times hc in eV"][0]
     for unit, multiplier in [
@@ -80,12 +86,16 @@ def test_frequency_units(tmp_path: Path) -> None:
             raw,
             frequency=(np.array(raw["frequency"]) * multiplier).tolist(),
             frequency_unit=unit,
+            qe_footer_delta_frequency=raw["qe_footer_delta_frequency"] * multiplier,
         )
         out = analyze_a2f(converted)
         assert out["lambda"] == pytest.approx(baseline["lambda"], rel=1e-12)
+        assert out["qe_midpoint_lambda"] == pytest.approx(
+            baseline["qe_midpoint_lambda"], rel=1e-12
+        )
         assert out["omega_log_K"] == pytest.approx(baseline["omega_log_K"], rel=1e-12)
     with pytest.raises(ValueError, match="conflicts"):
-        read_a2f(DATA / "a2F.dos5.gz", frequency_unit="meV")
+        read_a2f(DATA / "a2F.dos1.gz", frequency_unit="meV")
     f = tmp_path / "unknown"
     f.write_text("1 2\n2 3\n3 4\n")
     with pytest.raises(ValueError, match="unavailable"):
@@ -95,7 +105,7 @@ def test_frequency_units(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("value", [0, -1])
 def test_invalid_moments_not_zero_Tc(value: float) -> None:
-    raw = read_a2f(DATA / "a2F.dos5.gz")
+    raw = read_a2f(DATA / "a2F.dos1.gz")
     raw["alpha2F"] = [value] * len(raw["frequency"])
     out = analyze_a2f(raw)
     assert out["status"] == "invalid"
@@ -105,8 +115,8 @@ def test_invalid_moments_not_zero_Tc(value: float) -> None:
 
 
 def test_formula_domain_and_large_lambda() -> None:
-    raw = read_a2f(DATA / "a2F.dos5.gz")
-    out = analyze_a2f(raw, mu_stars=(1.0,))
+    raw = read_a2f(DATA / "a2F.dos1.gz")
+    out = analyze_a2f(raw, mu_stars=(2.0,))
     assert all(
         r["Tc_K"] is None and r["reason"] == "nonpositive_formula_denominator"
         for r in out["Tc"]
@@ -166,13 +176,15 @@ def make_dfpt_source(path: Path) -> None:
     for i in [1, 2]:
         (path / f"matdyn{i}").write_text("dynamical matrix fixture")
     elph = path / "elph_dir"
-    elph.mkdir()
+    elph.mkdir(exist_ok=True)
     for q in [1, 2]:
         (elph / f"elph.inp_lambda.{q}").write_text(
             "Gaussian Broadening: 0.005 Ry\nGaussian Broadening: 0.010 Ry\n"
         )
         for b in [51, 52]:
-            (elph / f"a2Fq2r.{b}.{q}").write_text("fixture")
+            (elph / f"a2Fq2r.{b}.{q}").write_text(
+                f"{0.005 * (b - 50):.16E} 0.5 4.0\nfixture"
+            )
 
 
 def test_staging_completeness_and_provenance(tmp_path: Path) -> None:
@@ -187,9 +199,9 @@ def test_staging_completeness_and_provenance(tmp_path: Path) -> None:
     (tmp_path / "elph_dir/a2Fq2r.52.2").unlink()
     with pytest.raises(ValueError, match="Incomplete"):
         epc_file_manifest(tmp_path, "q2r")
-    (tmp_path / "elph_dir/a2Fq2r.52.2").write_text("fixture")
+    (tmp_path / "elph_dir/a2Fq2r.52.2").write_text("0.01 0.5 4.0\nfixture")
     (tmp_path / "matdyn1").unlink()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="Missing EPC file"):
         epc_file_manifest(tmp_path, "q2r")
 
 
@@ -197,14 +209,24 @@ def test_missing_epc_and_force_constants(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Missing EPC"):
         epc_file_manifest(tmp_path, "q2r")
     make_dfpt_source(tmp_path)
-    with pytest.raises(ValueError, match="Incomplete q2r"):
+    (tmp_path / "q2r.fc").write_text("fixture")
+    with pytest.raises(ValueError, match="Incomplete or incorrect q2r"):
         epc_file_manifest(tmp_path, "matdyn")
-    for i in [51, 52]:
-        (tmp_path / f"elph_dir/a2Fmatdyn.{i}").write_text("fixture")
-    with pytest.raises(FileNotFoundError):
+    for i in [61, 62]:
+        (tmp_path / f"elph_dir/a2Fmatdyn.{i}").write_text(
+            f"{0.005 * (i - 60)} 0.5 4.0\nfixture"
+        )
+    (tmp_path / "q2r.fc").unlink()
+    with pytest.raises(FileNotFoundError, match="Missing EPC file"):
         epc_file_manifest(tmp_path, "matdyn")
     (tmp_path / "q2r.fc").write_text("force constants")
-    assert epc_file_manifest(tmp_path, "matdyn")["filenames"] == ["q2r.fc*", "elph_dir"]
+    assert set(epc_file_manifest(tmp_path, "matdyn")["filenames"]) == {
+        "q2r.fc",
+        "elph_dir/elph.inp_lambda.1",
+        "elph_dir/elph.inp_lambda.2",
+        "elph_dir/a2Fmatdyn.61",
+        "elph_dir/a2Fmatdyn.62",
+    }
 
 
 @pytest.mark.parametrize(
@@ -281,10 +303,7 @@ def test_three_point_moments(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("rows", "diagnostic"),
-    [
-        ("-1 2\n0 1\n1 1\n2 1\n", "insufficient_positive_frequency_points"),
-        ("1 10\n2 1\n3 -10\n", "invalid_frequency_moments"),
-    ],
+    [("-1 2\n0 1\n1 1\n2 1\n", "insufficient_positive_frequency_points")],
 )
 def test_unavailable_moments(tmp_path: Path, rows: str, diagnostic: str) -> None:
     f = tmp_path / "a2F.dos1"
@@ -306,9 +325,9 @@ def test_broadening_series_diagnostics(tmp_path: Path) -> None:
     result = analyze_epc_directory(tmp_path)
     assert [s["index"] for s in result["spectra"]] == list(range(1, 11))
     assert result["spectra"][1]["status"] == "unavailable"
-    assert result["spectra"][0]["qe_qsum"]["lambda"] == 0.81
+    assert result["qe_qsum"][0]["lambda"] == 0.81
     assert result["spectra"][0]["lambda"] == pytest.approx(0.8)
-    assert result["spectra"][0]["broadening_Ry"] == 0.005
+    assert result["spectra"][0]["broadening_Ry"] is None
     assert result["phonon_dos"]["diagnostics"]["integrated_states"] == 4
     result = analyze_epc_directory(tmp_path, broadenings_Ry=(0.01,))
     assert result["spectra"][0]["reason"] == "broadening_identity_conflict"
@@ -316,8 +335,7 @@ def test_broadening_series_diagnostics(tmp_path: Path) -> None:
     (tmp_path / "a2F.dos3").write_text("# Ry\n1 bad\n")
     assert analyze_epc_directory(tmp_path)["spectra"][2]["status"] == "invalid"
     (tmp_path / "a2F.dos1.gz").write_bytes(b"ambiguous")
-    with pytest.raises(ValueError, match="Ambiguous duplicate"):
-        analyze_epc_directory(tmp_path)
+    assert analyze_epc_directory(tmp_path)["spectra"][0]["status"] == "invalid"
 
 
 @pytest.mark.parametrize(
@@ -332,7 +350,14 @@ def test_broadening_series_diagnostics(tmp_path: Path) -> None:
     ],
 )
 def test_invalid_analysis_settings(tmp_path: Path, kwargs: dict) -> None:
-    with pytest.raises(ValueError, match=r"finite|nonnegative|positive"):
+    message = (
+        "mu_stars"
+        if "mu_stars" in kwargs
+        else "Broadenings"
+        if "broadenings_Ry" in kwargs
+        else "Imaginary-frequency tolerance"
+    )
+    with pytest.raises(ValueError, match=message):
         analyze_epc_directory(tmp_path, **kwargs)
 
 
@@ -353,7 +378,14 @@ def test_invalid_dfpt_layout(tmp_path: Path, problem: str) -> None:
         (tmp_path / "elph_dir/a2Fq2r.51.1.gz").write_bytes(gzip.compress(b"duplicate"))
     else:
         (tmp_path / "elph_dir/a2Fq2r.51.3").write_text("extra")
-    with pytest.raises(ValueError, match=r"Inconsistent|Incomplete|Invalid|Ambiguous"):
+    message = {
+        "metadata": "Inconsistent/missing",
+        "qpoint": "Incomplete/ambiguous",
+        "header": "Invalid DFPT",
+        "duplicate": "Ambiguous plain/gzip",
+        "extra_qpoint": "Incomplete or incorrect",
+    }[problem]
+    with pytest.raises(ValueError, match=message):
         epc_file_manifest(tmp_path, "q2r")
 
 
@@ -365,9 +397,9 @@ def test_invalid_manifest_options_and_metadata(tmp_path: Path) -> None:
     (tmp_path / "elph_dir").mkdir()
     with pytest.raises(FileNotFoundError, match="broadening metadata"):
         epc_file_manifest(tmp_path, "q2r")
-    (tmp_path / "elph_dir/elph.inp_lambda.1").write_text(
-        "Gaussian Broadening: -0.01 Ry\n"
-    )
+    make_dfpt_source(tmp_path)
+    for q in [1, 2]:
+        (tmp_path / f"elph_dir/a2Fq2r.51.{q}").write_text("-0.01 0.5 4.0\n")
     with pytest.raises(ValueError, match="finite positive"):
         epc_file_manifest(tmp_path, "q2r")
 
@@ -375,9 +407,9 @@ def test_invalid_manifest_options_and_metadata(tmp_path: Path) -> None:
 def test_duplicate_transformed_epc_files(tmp_path: Path) -> None:
     make_dfpt_source(tmp_path)
     (tmp_path / "q2r.fc").write_text("fixture")
-    for name in ["a2Fmatdyn.51", "a2Fmatdyn.51.gz"]:
+    for name in ["a2Fmatdyn.61", "a2Fmatdyn.61.gz"]:
         (tmp_path / "elph_dir" / name).write_bytes(gzip.compress(b"duplicate"))
-    with pytest.raises(ValueError, match="Ambiguous duplicate"):
+    with pytest.raises(ValueError, match="Ambiguous plain/gzip"):
         epc_file_manifest(tmp_path, "matdyn")
 
 
@@ -395,4 +427,200 @@ def test_one_bin_dos_is_not_zero_integrated_states(tmp_path: Path) -> None:
     (tmp_path / "matdyn.dos").write_text("# cm^-1\n1 2\n")
     diagnostics = analyze_epc_directory(tmp_path)["phonon_dos"]["diagnostics"]
     assert diagnostics["integrated_states"] is None
-    assert diagnostics["status"] == "insufficient_grid_points"
+    assert diagnostics["status"] == "insufficient_or_nonfinite_grid_integral"
+
+
+@pytest.mark.parametrize("sigma", [0.0025, 0.0004])
+def test_full_precision_broadening_headers(tmp_path: Path, sigma: float) -> None:
+    make_dfpt_source(tmp_path)
+    for q in [1, 2]:
+        (tmp_path / f"elph_dir/elph.inp_lambda.{q}").write_text(
+            "".join(
+                f"     Gaussian Broadening: {i * sigma:7.3f} Ry, ngauss=   0\n"
+                for i in [1, 2]
+            )
+        )
+        for i in [1, 2]:
+            (tmp_path / f"elph_dir/a2Fq2r.{50 + i}.{q}").write_text(
+                f"{i * sigma:.16E} 0.5 4.0\n"
+            )
+    assert epc_file_manifest(tmp_path, "q2r")["broadenings_Ry"] == [sigma, 2 * sigma]
+
+
+@pytest.mark.parametrize("stage", ["q2r", "matdyn"])
+def test_exact_qe_file_number_sets(tmp_path: Path, stage: str) -> None:
+    make_dfpt_source(tmp_path)
+    if stage == "q2r":
+        for q in [1, 2]:
+            (tmp_path / f"elph_dir/a2Fq2r.52.{q}").rename(
+                tmp_path / f"elph_dir/a2Fq2r.53.{q}"
+            )
+    else:
+        (tmp_path / "q2r.fc").write_text("fixture")
+        for i in [51, 99]:
+            (tmp_path / f"elph_dir/a2Fmatdyn.{i}").write_text("0.0025 0.5 4.0\n")
+    with pytest.raises(ValueError, match="Incomplete or incorrect"):
+        epc_file_manifest(tmp_path, stage)
+
+
+@pytest.mark.parametrize("name", ["matdyn0", "matdyn1", "q2r.fc"])
+def test_ambiguous_staged_files(tmp_path: Path, name: str) -> None:
+    make_dfpt_source(tmp_path)
+    (tmp_path / "q2r.fc").write_text("fixture")
+    (tmp_path / (name + ".gz")).write_bytes(gzip.compress(b"different"))
+    with pytest.raises(ValueError, match="Ambiguous plain/gzip"):
+        epc_file_manifest(tmp_path, "matdyn" if name == "q2r.fc" else "q2r")
+
+
+@pytest.mark.parametrize("name", ["matdyn.freq", "matdyn.dos", "lambda", "a2F.dos1"])
+def test_duplicate_output_is_a_component_diagnostic(tmp_path: Path, name: str) -> None:
+    (tmp_path / name).write_text("fixture")
+    (tmp_path / (name + ".gz")).write_bytes(gzip.compress(b"different"))
+    result = analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025,))
+    assert result["status"] == "incomplete_or_invalid"
+    assert result["diagnostics"]
+    assert all(tc["status"] != "estimated" for tc in result["spectra"][0]["Tc"])
+    json.dumps(result, allow_nan=False)
+
+
+def test_qsum_rows_are_matched_by_value(tmp_path: Path) -> None:
+    for i in [1, 2, 3]:
+        (tmp_path / f"a2F.dos{i}").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
+    (tmp_path / "lambda").write_text(
+        " Broadening 0.0075 lambda 0.83 dos(Ef)120.0000 omega_ln [K]700\n"
+        " Broadening 0.0050 lambda 0.82 dos(Ef)4.0 omega_ln [K]NaN\n"
+        " Broadening 0.0025 lambda 0.81 dos(Ef)4.0 omega_ln [K]750\n"
+        " Broadening bad incomplete line\n"
+    )
+    result = analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025, 0.005, 0.0075))
+    assert [s["qe_qsum"]["lambda"] for s in result["spectra"]] == [0.81, 0.82, 0.83]
+    assert result["spectra"][1]["qe_qsum"]["omega_log_K"] is None
+    assert any(d["status"] == "malformed_row" for d in result["diagnostics"])
+    assert any(d["status"] == "nonfinite_row" for d in result["diagnostics"])
+    assert all(s["Tc"][0]["status"] == "estimated" for s in result["spectra"])
+    unknown = analyze_epc_directory(tmp_path)
+    assert all(
+        s["broadening_Ry"] is None and "qe_qsum" not in s for s in unknown["spectra"]
+    )
+    json.dumps(result, allow_nan=False)
+
+
+def test_identity_conflict_invalidates_tc(tmp_path: Path) -> None:
+    (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
+    (tmp_path / "lambda").write_text(
+        "Broadening .01 lambda .8 dos(Ef)4 omega_ln [K]750\n"
+    )
+    spectrum = analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025,))["spectra"][0]
+    assert spectrum["status"] == "invalid"
+    assert spectrum["lambda"] is None
+    assert all(
+        tc["Tc_K"] is None and tc["reason"] == "broadening_identity_conflict"
+        for tc in spectrum["Tc"]
+    )
+
+
+def test_totals_only_spectrum_and_method_domains(tmp_path: Path) -> None:
+    f = tmp_path / "a2F.dos1"
+    f.write_text("# Ry\n1 .2\n2 .4\n3 .6\n4 .8\n5 1.0\nlambda = 1.6\n")
+    result = analyze_a2f(read_a2f(f))
+    assert result["mode_lambda"] == []
+    assert result["lambda"] == pytest.approx(1.6)
+    f.write_text("# Ry\n1 10\n2 1\n3 -10\nlambda = 5.77\n")
+    result = analyze_a2f(read_a2f(f))
+    assert result["omega_log_K"] > 0
+    assert result["omega_2_K"] is None
+    assert result["Tc"][0]["status"] == "estimated"
+    assert result["Tc"][1]["Tc_K"] is None
+    assert "Tc_unavailable" in result["warnings"]
+
+
+def test_fixed_width_imaginary_modes_and_overflow(tmp_path: Path) -> None:
+    f = tmp_path / "matdyn.freq"
+    f.write_text(
+        " &plot nbnd=3, nks=1 /\n0 0 0\n"
+        + "".join(f"{v:10.4f}" for v in [-1234.5678, -2345.6789, 3])
+        + "\n"
+    )
+    assert read_matdyn_frequencies(f)["frequencies"][0] == [-1234.5678, -2345.6789, 3]
+    f.write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n**********    1.0000    2.0000\n")
+    with pytest.raises(ValueError, match="frequency field overflow"):
+        read_matdyn_frequencies(f)
+    result = analyze_epc_directory(tmp_path)
+    assert result["frequencies"] is None
+    assert "overflow" in result["diagnostics"][0]["reason"]
+
+
+def test_interrupted_tables_and_ambiguous_header_units(tmp_path: Path) -> None:
+    f = tmp_path / "a2F.dos1"
+    f.write_text("# Ry\n1 .2\nBROKEN ROW\n2 .4\n3 .6\n")
+    with pytest.raises(ValueError, match="Non-numeric interruption"):
+        read_a2f(f)
+    f.write_text("# cm^-1 and Ry\n1 .2\n2 .4\n3 .6\n")
+    with pytest.raises(ValueError, match="Ambiguous frequency units"):
+        read_a2f(f)
+    f.write_text("# RY\n1 .2\n2 .4\n3 .6\n# eV is only a footer annotation\n")
+    raw = read_a2f(f)
+    assert raw["frequency_unit"] == "Ry"
+    assert "truncation" in raw["diagnostics"][0]
+
+
+def test_nonfinite_derived_quantities_remain_json_serializable(tmp_path: Path) -> None:
+    f = tmp_path / "a2F.dos1"
+    f.write_text("# Ry\n1e-320 1e300 1e300\n2e-320 1e300 1e300\n3e-320 1e300 1e300\n")
+    result = analyze_a2f(read_a2f(f))
+    assert result["lambda"] is None
+    assert result["mode_lambda"] == [None]
+    assert "nonfinite_mode_integral" in result["warnings"]
+    json.dumps(result, allow_nan=False)
+
+
+def test_compression_independent_provenance(tmp_path: Path) -> None:
+    from quacc.calculators.espresso.epc import file_provenance
+
+    p = tmp_path / "data"
+    p.write_text("same scientific bytes\n")
+    first = file_provenance(p)
+    p.with_name("data.gz").write_bytes(gzip.compress(p.read_bytes(), mtime=10))
+    p.unlink()
+    second = file_provenance(p)
+    assert first["uncompressed_sha256"] == second["uncompressed_sha256"]
+    assert first["sha256"] != second["sha256"]
+    assert second["compression"] == "gzip"
+
+
+def test_instability_units_and_tc_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quacc.calculators.espresso import epc
+
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-20 1 2\n")
+    (tmp_path / "matdyn.dos").write_text("# cm^-1\n0 0\n1 2.25\n2 0\n")
+    (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
+    native = epc.read_matdyn_frequencies(tmp_path / "matdyn.freq")
+    cm_per_ev = physical_constants["electron volt-inverse meter relationship"][0] / 100
+    native.update(
+        frequencies=(np.array(native["frequencies"]) / cm_per_ev).tolist(),
+        frequency_unit="eV",
+    )
+    monkeypatch.setattr(epc, "read_matdyn_frequencies", lambda _: native)
+    result = epc.analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025,))
+    assert result["instability"]["minimum_frequency_cm1"] == pytest.approx(-20)
+    assert result["status"] == "sampled_instability"
+    assert "sampled_instability" in result["spectra"][0]["Tc"][0]["warnings"][0]
+    native["frequencies"] = [[-1e308, 1e308, 0]]
+    result = epc.analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025,))
+    assert result["instability"] is None
+    assert result["status"] == "incomplete_or_invalid"
+    json.dumps(result, allow_nan=False)
+
+
+def test_qe_midpoint_anchor_is_distinct_from_positive_simpson(tmp_path: Path) -> None:
+    f = tmp_path / "a2F.dos1"
+    # Uniform bin-centred values include a nonpositive-frequency contribution.
+    f.write_text("# Ry\n-1 .2\n1 .4\n3 .6\n5 .8\nlambda = 2.24 Delta = 2\n")
+    result = analyze_a2f(read_a2f(f))
+    assert result["qe_midpoint_lambda"] == pytest.approx(2.24)
+    assert result["qe_midpoint_footer_difference"] == pytest.approx(0)
+    assert (
+        "Simpson_positive_frequency_vs_QE_midpoint_disagreement" in result["warnings"]
+    )

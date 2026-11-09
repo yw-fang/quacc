@@ -1,31 +1,31 @@
-"""Formula-based EPC postprocessing, independent of electronic/plotting recipes."""
+"""QE interpolated electron-phonon postprocessing jobs and flow."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from monty.json import jsanitize
+from monty.io import zopen
 
-from quacc import flow, job
-from quacc.calculators.espresso.epc import analyze_epc_directory
+from quacc import flow, get_settings, job
+from quacc.calculators.espresso.epc import (
+    analyze_epc_directory,
+    file_provenance,
+    validate_epc_settings,
+)
+from quacc.utils.dicts import recursive_dict_merge
 from quacc.wflow_tools.customizers import customize_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
-    from quacc.types import EspressoEPCSchema, RunSchema, SourceDirectory
-
-
-def _json_ready(value: Any) -> Any:
-    # ASE Namelist is a UserDict, not a dict or an MSONable. Normalize mappings
-    # before Monty handles Paths, NumPy values and other recognized metadata.
-    if isinstance(value, Mapping):
-        return {str(key): _json_ready(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_ready(item) for item in value]
-    return jsanitize(value, strict=True, enum_values=True)
+    from quacc.types import (
+        EPCResultSchema,
+        EspressoEPCSchema,
+        RunSchema,
+        SourceDirectory,
+    )
 
 
 @job
@@ -34,7 +34,7 @@ def epc_analysis_job(
     matdyn_results: RunSchema,
     mu_stars: tuple[float, ...] = (0.10,),
     imaginary_tolerance_cm1: float = 10.0,
-) -> dict[str, Any]:
+) -> EPCResultSchema:
     """Summarize completed EPC interpolation independently of figures.
 
     Parameters
@@ -50,7 +50,7 @@ def epc_analysis_job(
 
     Returns
     -------
-    dict
+    EPCResultSchema
         JSON-serializable scientific result for every broadening, with signed
         spectra, named Tc methods, diagnostics, settings and source provenance.
         These estimates are not numerical Eliashberg solutions.
@@ -64,17 +64,27 @@ def epc_analysis_job(
         broadenings_Ry=source.get("broadenings_Ry"),
         imaginary_tolerance_cm1=imaginary_tolerance_cm1,
     )
-    result["settings"] = {
-        "q2r": q2r_data.get("parameters"),
-        "matdyn": matdyn_data.get("parameters"),
-    }
+    result["settings"] = {}
     result["input_provenance"] = {
         "DFPT": source,
         "q2r": matdyn_data.get("epc_input_manifest"),
+        "written_inputs": {},
     }
-    # QE parameters may contain Paths/NumPy scalars despite numeric arrays being
-    # plain lists. Keep the scientific result portable with strict JSON encoders.
-    return _json_ready(result)
+    for name, data in [("q2r", q2r_data), ("matdyn", matdyn_data)]:
+        try:
+            provenance = file_provenance(Path(data["dir_name"]) / f"{name}.in")
+            result["input_provenance"]["written_inputs"][name] = provenance
+            with zopen(provenance["path"], "rt", encoding="utf-8") as stream:
+                result["settings"][name] = stream.read()
+        except (KeyError, OSError, ValueError) as exc:
+            result["diagnostics"].append(
+                {
+                    "component": f"{name}_input",
+                    "status": "unavailable",
+                    "reason": str(exc),
+                }
+            )
+    return result
 
 
 @flow
@@ -85,7 +95,12 @@ def epc_postprocess_flow(
     job_params: dict[str, Any] | None = None,
     job_decorators: dict[str, Callable | None] | None = None,
 ) -> EspressoEPCSchema:
-    """Postprocess completed DFPT/EPC: q2r → matdyn → scientific results.
+    """Postprocess completed DFPT/EPC data.
+
+    Consists of following jobs that can be modified:
+    1. q2r_job: transform dynamical matrices and EPC coefficients.
+    2. matdyn_job: interpolate frequencies, DOS and spectra.
+    3. epc_analysis_job: integrate moments and estimate Tc per broadening.
 
     Parameters
     ----------
@@ -100,7 +115,8 @@ def epc_postprocess_flow(
     job_params
         Keyword overrides for q2r_job, matdyn_job and epc_analysis_job, following
         QuAcc's customize_jobs convention. Defaults use la2f, simple ASR and a
-        32-cubed DOS interpolation grid. No PW or DFPT calculation is launched.
+        32-cubed DOS interpolation grid. The heterogeneous jobs do not accept
+        the shared "all" parameter override; customize each named job instead.
     job_decorators
         Per-job decorator overrides using the same three job names.
 
@@ -108,9 +124,18 @@ def epc_postprocess_flow(
     -------
     dict
         q2r_job and matdyn_job execution results and the independent epc_results
-        scientific dictionary. No plotting, scheduler or notification is used.
+        scientific dictionary. Requires unique per-job result directories.
     """
+    # Keep analysis-only imports usable with the numerical dependencies alone.
     from quacc.recipes.espresso.phonons import matdyn_job, q2r_job
+
+    if not get_settings().CREATE_UNIQUE_DIR:
+        raise ValueError("EPC postprocessing requires CREATE_UNIQUE_DIR=True")
+    if "all" in (job_params or {}):
+        raise ValueError(
+            "EPC flow job_params['all'] is unsupported; customize named jobs"
+        )
+    validate_epc_settings(mu_stars, imaginary_tolerance_cm1)
 
     defaults: dict[str, dict[str, Any]] = {
         "q2r_job": {"input_data": {"input": {"la2f": True, "zasr": "simple"}}},
@@ -131,6 +156,17 @@ def epc_postprocess_flow(
             "imaginary_tolerance_cm1": imaginary_tolerance_cm1,
         },
     }
+    effective = recursive_dict_merge(defaults, job_params or {})
+    analysis_settings = effective["epc_analysis_job"]
+    validate_epc_settings(
+        analysis_settings["mu_stars"], analysis_settings["imaginary_tolerance_cm1"]
+    )
+    for name in ("q2r_job", "matdyn_job"):
+        data = effective[name].get("input_data", {})
+        if "la2f" in data or data.get("input", {}).get("la2f") is not True:
+            raise ValueError(f"{name} requires nested input_data['input']['la2f']=True")
+    if effective["matdyn_job"]["input_data"]["input"].get("dos") is not True:
+        raise ValueError("EPC postprocessing requires matdyn dos=True")
     fc_job, spectral_job, analysis_job = customize_jobs(
         {
             "q2r_job": q2r_job,

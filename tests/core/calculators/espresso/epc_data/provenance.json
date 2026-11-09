@@ -1,29 +1,70 @@
 {
-  "material": "MgB2",
-  "source": "saved QE7.5 PBEsol q4 benchmark, no new DFPT",
-  "broadening_Ry": 0.025,
-  "frequency_unit": "Ry for a2F, cm^-1 for frequencies/DOS",
-  "files": {
-    "a2F.dos5": {
-      "fixture": "a2F.dos5.gz",
-      "sha256_uncompressed": "ed0a0d19889bbcc659540c011791759944c90c0e9630752a59628a421e206999",
-      "bytes_uncompressed": 146366,
-      "original_sha256": "ed0a0d19889bbcc659540c011791759944c90c0e9630752a59628a421e206999",
-      "scope": "complete spectrum"
-    },
-    "matdyn.freq": {
-      "fixture": "matdyn.freq",
-      "sha256_uncompressed": "2c50c2388abcfb3203dbf9cb6a6a50b276644293154945c4f772fed7b0c846ab",
-      "bytes_uncompressed": 312,
-      "original_sha256": "47ac61089daf5021e091c91f7b666198aa29a40657ecc230ef39dd3ecc216cb9",
-      "scope": "first two q-points; nks adjusted"
-    },
-    "matdyn.dos": {
-      "fixture": "matdyn.dos",
-      "sha256_uncompressed": "c3fda434fe0175dd5dd09c5bb31fe630eefbeebf650298f6f607980edd9c33fd",
-      "bytes_uncompressed": 248,
-      "original_sha256": "aaed31a4b19dc734650c57bcb22ccb019441d30c243bee5a34b0e194db818ba4",
-      "scope": "header and first three frequency rows; not a normalized DOS"
-    }
+  "material": "fcc Pb, one atom",
+  "source": "QE 7.5 scalar-relativistic PZ, ICTP tutorial-style validation; not converged superconductivity",
+  "parameters": {
+    "lattice_a_bohr": 9.2225583816,
+    "ecutwfc_Ry": 30,
+    "ecutrho_Ry": 120,
+    "fine_kmesh": [
+      18,
+      18,
+      18
+    ],
+    "coarse_kmesh": [
+      9,
+      9,
+      9
+    ],
+    "qmesh": [
+      3,
+      3,
+      3
+    ],
+    "el_ph_sigma_Ry": 0.0025,
+    "el_ph_nsigma": 2,
+    "interpolation_mesh": [
+      8,
+      8,
+      8
+    ],
+    "ndos": 120,
+    "SOC": false
+  },
+  "potential": {
+    "name": "pb_s.UPF",
+    "sha256": "24fe8cc951a89521da24dc6bd936b462078927a6970132848a355857a82d27af"
+  },
+  "tutorial": "https://indico.ictp.it/event/8301/session/96/contribution/534/material/0/0.pdf",
+  "numerical_reference_commit": "4e86e82ae2eec3762f66e6228a70f67b69570789",
+  "same_algorithm_relative_tolerance": 2e-07,
+  "DFPT_uncompressed_hashes": {
+    "matdyn1": "0633c74bbfe4b1e7493644b99cb6af6ecdb7e4389c0c1de1e599e486e266fd92",
+    "matdyn3": "b969a9b089d28bb9445e1fd6b485fce93ad78771e109ca95524b09c6a18f66c2",
+    "matdyn4": "0f75e24d11bcc2b2c7c5181a3de973936755b0fdbe9fe581d4de168243a34259",
+    "matdyn0": "ad5413601233eba23d602dc02fb5a6be14396930fc8eb761ac9e9a71de2f70c6",
+    "matdyn2": "afec996eddf6eeb7d3e92e5b61caeed3cd37a7babb1ade2902c988365c411e6b",
+    "elph_dir/a2Fq2r.51.4": "11fb419e6cc83f6c3fb52d9eb6fbe6f5d0b0a0049a034a2f7180e96f6c7a7361",
+    "elph_dir/a2Fq2r.51.2": "0dd7d98b6464f39a2f04c7fe7054b2010e70e699d7c78f39072624fd3cc8dadc",
+    "elph_dir/elph.inp_lambda.2": "acb4d5341c89d344b5c809ffdb808e43958485d6f54466e98ccbcfb628c15d00",
+    "elph_dir/elph.inp_lambda.1": "6a805086981d9cf3ce39eb600f841c3fcf1a6802e07cae83a00555a247b66a57",
+    "elph_dir/elph.inp_lambda.4": "abc616b5f4625fd654d3b7c27593977f5d2c0511e564df0aef805d58fccdf845",
+    "elph_dir/a2Fq2r.52.3": "b476247bf723abea98521868e28e9596c8b7147eb41b795bfc4c0a4af5dbc716",
+    "elph_dir/a2Fq2r.52.4": "e8088fe44080c468ac1edd12c0b36a080783b46c3e7731fef1c60bfbd9a26f62",
+    "elph_dir/elph.inp_lambda.3": "ffe534614149acc4da78c26c243afb79cbb9a59bdf4a8345aaa362649e5dc772",
+    "elph_dir/a2Fq2r.51.1": "cf570a8dfa4ff60c235ab9968dbae0ef4d74c364bcd03e1b3dee3de09bdd6092",
+    "elph_dir/a2Fq2r.51.3": "beada4417d0ad65e160fdca94dd6fd2f0fb5e4ab3e368def0be48a0b9b956850",
+    "elph_dir/a2Fq2r.52.1": "000977a7488f3c3006ac1e7b45eb0848ebae0536e1fd3fe956cab05b1ce76ef0",
+    "elph_dir/a2Fq2r.52.2": "186efd0b8679e91d4da41aea94863d7b3172ee6f79fb88b9d18e3182137f26c9"
+  },
+  "postprocessing_uncompressed_hashes": {
+    "lambda": "a1a34a683245f461a6e037b582bfa7e57a85bbaf988198d430d18833a8b6d171",
+    "matdyn.in": "836654629bb8118d1b3ee09a982435bf396802a12c44583c19c3e3cc5f4d9656",
+    "matdyn.freq": "619a3b2318fbd16ff33638ae37875a71f3e24caed1e81570c5d00c45a97a4cb8",
+    "a2F.dos1": "3ea5b9796ef0430e3196bdf7686d1050876f71f4cbefec9d07862c2c52ad40c1",
+    "matdyn.dos": "c49e40fc14b494cce37f157bbf0003a66d9c79fed1c5d71288c68ec9ff7837bc"
+  },
+  "excerpts": {
+    "matdyn.freq": "first two q blocks; nks adjusted",
+    "matdyn.dos": "header and first three rows; not normalized"
   }
 }

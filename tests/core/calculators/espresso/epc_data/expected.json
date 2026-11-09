@@ -1,41 +1,32 @@
 [
   {
-    "qmesh": "[4, 4, 4]",
-    "broadening_index": "5",
-    "broadening_Ry": "0.025",
-    "broadening_eV": "0.34014232807485",
-    "mu_star": "0.1",
-    "lambda": "0.4989999366815703",
-    "omega_log_K": "776.942817828178",
-    "omega_2_K": "840.8868196071095",
-    "McMillan_omega_log_K": "9.369445815140404",
-    "Allen_Dynes_K": "9.560764954759714",
-    "flags": "negative_spectral_weight"
+    "broadening_index": 1,
+    "broadening_Ry": 0.0025,
+    "mu_star": 0.1,
+    "lambda": 7.875436476796867,
+    "omega_log_K": 64.2876372164752,
+    "omega_2_K": 68.04225513743206,
+    "McMillan_omega_log_K": 15.095127126096326,
+    "Allen_Dynes_K": 26.241952273952318
   },
   {
-    "qmesh": "[4, 4, 4]",
-    "broadening_index": "5",
-    "broadening_Ry": "0.025",
-    "broadening_eV": "0.34014232807485",
-    "mu_star": "0.13",
-    "lambda": "0.4989999366815703",
-    "omega_log_K": "776.942817828178",
-    "omega_2_K": "840.8868196071095",
-    "McMillan_omega_log_K": "5.648569115605669",
-    "Allen_Dynes_K": "5.750228203574064",
-    "flags": "negative_spectral_weight"
+    "broadening_index": 1,
+    "broadening_Ry": 0.0025,
+    "mu_star": 0.13,
+    "lambda": 7.875436476796867,
+    "omega_log_K": 64.2876372164752,
+    "omega_2_K": 68.04225513743206,
+    "McMillan_omega_log_K": 14.6279463102742,
+    "Allen_Dynes_K": 24.626938176283097
   },
   {
-    "qmesh": "[4, 4, 4]",
-    "broadening_index": "5",
-    "broadening_Ry": "0.025",
-    "broadening_eV": "0.34014232807485",
-    "mu_star": "0.15",
-    "lambda": "0.4989999366815703",
-    "omega_log_K": "776.942817828178",
-    "omega_2_K": "840.8868196071095",
-    "McMillan_omega_log_K": "3.7473224882550467",
-    "Allen_Dynes_K": "3.809679368000659",
-    "flags": "negative_spectral_weight"
+    "broadening_index": 1,
+    "broadening_Ry": 0.0025,
+    "mu_star": 0.15,
+    "lambda": 7.875436476796867,
+    "omega_log_K": 64.2876372164752,
+    "omega_2_K": 68.04225513743206,
+    "McMillan_omega_log_K": 14.311930611917951,
+    "Allen_Dynes_K": 23.624487751414375
   }
 ]

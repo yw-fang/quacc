@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from ase.io.espresso import Namelist
 
 from quacc import Job, flow, job, subflow
-from quacc.calculators.espresso.epc import epc_file_manifest
+from quacc.calculators.espresso.epc import epc_copy_files, epc_file_manifest
 from quacc.calculators.espresso.espresso import EspressoTemplate
 from quacc.calculators.espresso.utils import grid_copy_files, grid_prepare_repr
 from quacc.recipes.espresso._base import run_and_summarize
@@ -148,21 +148,33 @@ def q2r_job(
         See the type-hint for the data structure.
     """
     fields: dict[str, Any] = {}
+    data = dict(calc_kwargs.get("input_data") or {})
+    if "la2f" in data:
+        raise ValueError("q2r la2f must be nested under input_data['input']")
+    inp = Namelist(data)
+    inp.to_nested(binary="q2r")
+    if not isinstance(inp.get("input", {}).get("la2f", False), bool):
+        raise ValueError("la2f must be a Python boolean")
     if source_directory is not None:
-        inp = Namelist(calc_kwargs.get("input_data"))
-        inp.to_nested(binary="q2r")
         if inp.get("input", {}).get("la2f", False):
             manifest = epc_file_manifest(
                 source_directory, "q2r", inp["input"].get("fildyn", "matdyn")
             )
             names = manifest["filenames"]
+            count = len(manifest["broadenings_Ry"])
+            if inp["input"].get("el_ph_nsigma", count) != count:
+                raise ValueError("el_ph_nsigma disagrees with the validated EPC series")
+            inp["input"]["el_ph_nsigma"] = count
+            calc_kwargs["input_data"] = inp
             fields["epc_input_manifest"] = manifest
         else:
             names = [f"{inp.get('input', {}).get('fildyn', 'matdyn')}[0-9]*"]
-        copy_files = [
-            {"source": source_directory, "filenames": names},
-            *(copy_files or []),
-        ]
+        copy_files = epc_copy_files(
+            source_directory,
+            names,
+            copy_files,
+            inp.get("input", {}).get("fildyn", "matdyn"),
+        )
     return run_and_summarize(
         template=EspressoTemplate("q2r"),
         calc_defaults={},
@@ -211,19 +223,31 @@ def matdyn_job(
         See the type-hint for the data structure.
     """
     fields: dict[str, Any] = {}
+    data = dict(calc_kwargs.get("input_data") or {})
+    if "la2f" in data:
+        raise ValueError("matdyn la2f must be nested under input_data['input']")
+    inp = Namelist(data)
+    inp.to_nested(binary="matdyn")
+    if not isinstance(inp.get("input", {}).get("la2f", False), bool):
+        raise ValueError("la2f must be a Python boolean")
     if source_directory is not None:
-        inp = Namelist(calc_kwargs.get("input_data"))
-        inp.to_nested(binary="matdyn")
         if inp.get("input", {}).get("la2f", False):
             manifest = epc_file_manifest(source_directory, "matdyn")
             names = manifest["filenames"]
+            count = len(manifest["broadenings_Ry"])
+            if inp["input"].get("el_ph_nsigma", count) != count:
+                raise ValueError("el_ph_nsigma disagrees with the validated EPC series")
+            inp["input"]["el_ph_nsigma"] = count
+            calc_kwargs["input_data"] = inp
             fields["epc_input_manifest"] = manifest
         else:
             names = ["q2r.fc*"]
-        copy_files = [
-            {"source": source_directory, "filenames": names},
-            *(copy_files or []),
-        ]
+        copy_files = epc_copy_files(
+            source_directory,
+            names,
+            copy_files,
+            inp.get("input", {}).get("fildyn", "matdyn"),
+        )
     return run_and_summarize(
         template=EspressoTemplate("matdyn"),
         calc_defaults={},

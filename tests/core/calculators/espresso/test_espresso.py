@@ -356,13 +356,3 @@ def test_prepare_copy_files_ph_recovery():
 )
 def test_prepare_copy_files_postprocessing(binary, expected):
     assert expected in prepare_copy_files({}, binary=binary)
-
-
-@pytest.mark.parametrize("binary", ["q2r", "matdyn"])
-@pytest.mark.parametrize("la2f", [False, True])
-def test_prepare_copy_files_epc(binary, la2f):
-    to_copy = prepare_copy_files(
-        {"input_data": {"input": {"la2f": la2f}}}, binary=binary
-    )
-    assert (Path("elph_dir") in to_copy) is la2f
-    assert Path("matdyn*" if binary == "q2r" else "q2r.fc*") in to_copy

@@ -20,27 +20,36 @@ if TYPE_CHECKING:
     from quacc.recipes.common.eos import eos_flow, eos_subflow
     from quacc.recipes.common.slabs import bulk_to_slabs_subflow, slab_to_ads_subflow
     from quacc.recipes.emt.slabs import bulk_to_slabs_flow
-    from quacc.recipes.espresso.epc import epc_postprocess_flow
+    from quacc.recipes.espresso.epc import epc_analysis_job, epc_postprocess_flow
     from quacc.recipes.vasp.qmof import QMOFRelaxSchema
     from quacc.recipes.vasp.slabs import relax_job, static_job
     from quacc.runners.ase import Runner
     from quacc.schemas.ase import Summarize
     from quacc.types import (
+        A2FSpectrumSchema,
         DynSchema,
+        EPCResultSchema,
         EspressoEPCSchema,
         MDParams,
         NebResultSchema,
         OptParams,
         OptSchema,
         RunSchema,
+        TcEstimateSchema,
         TrajectoryLog,
         VaspSchema,
         VibThermoSchema,
     )
     from quacc.utils.files import find_recent_logfile
 
-    def check_epc_api(source: Path) -> None:
-        assert_type(epc_postprocess_flow(source, mu_stars=(0.1,)), EspressoEPCSchema)
+    def check_epc_api(source: Path, q2r: RunSchema, matdyn: RunSchema) -> None:
+        output = epc_postprocess_flow(source, mu_stars=(0.1,))
+        assert_type(output, EspressoEPCSchema)
+        assert_type(output["epc_results"], EPCResultSchema)
+        assert_type(epc_analysis_job(q2r, matdyn), EPCResultSchema)
+        assert_type(output["epc_results"]["spectra"][0], A2FSpectrumSchema)
+        assert_type(output["epc_results"]["spectra"][0]["Tc"][0], TcEstimateSchema)
+        assert_type(output["epc_results"]["spectra"][0]["lambda"], float | None)
 
     def check_api(
         atoms: Atoms,
