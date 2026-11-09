@@ -275,6 +275,12 @@ class EspressoTemplate(EspressoTemplate_):
         espresso_outdir = Path(self.outdir or directory).expanduser().resolve()
         outkeys = espresso_prepare_dir(espresso_outdir, self.binary)
 
+        if self.binary == "q2r":
+            # Completed DFPT sources need not use QuAcc's default matrix prefix.
+            fildyn = parameters.get("input_data", {}).get("input", {}).get("fildyn")
+            if fildyn is not None:
+                outkeys["input"]["fildyn"] = fildyn
+
         input_data = parameters.get("input_data", {})
         input_data = recursive_dict_merge(input_data, outkeys, verbose=True)
 

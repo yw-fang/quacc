@@ -730,6 +730,11 @@ if TYPE_CHECKING:
         q2r_job: RunSchema
         matdyn_job: RunSchema
 
+    class EspressoEPCSchema(TypedDict):
+        q2r_job: RunSchema
+        matdyn_job: RunSchema
+        epc_results: dict[str, Any]
+
     class NebSchema(TypedDict):
         relax_reactant: OptSchema
         relax_product: OptSchema

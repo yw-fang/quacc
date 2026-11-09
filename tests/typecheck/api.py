@@ -20,12 +20,14 @@ if TYPE_CHECKING:
     from quacc.recipes.common.eos import eos_flow, eos_subflow
     from quacc.recipes.common.slabs import bulk_to_slabs_subflow, slab_to_ads_subflow
     from quacc.recipes.emt.slabs import bulk_to_slabs_flow
+    from quacc.recipes.espresso.epc import epc_postprocess_flow
     from quacc.recipes.vasp.qmof import QMOFRelaxSchema
     from quacc.recipes.vasp.slabs import relax_job, static_job
     from quacc.runners.ase import Runner
     from quacc.schemas.ase import Summarize
     from quacc.types import (
         DynSchema,
+        EspressoEPCSchema,
         MDParams,
         NebResultSchema,
         OptParams,
@@ -36,6 +38,9 @@ if TYPE_CHECKING:
         VibThermoSchema,
     )
     from quacc.utils.files import find_recent_logfile
+
+    def check_epc_api(source: Path) -> None:
+        assert_type(epc_postprocess_flow(source, mu_stars=(0.1,)), EspressoEPCSchema)
 
     def check_api(
         atoms: Atoms,
