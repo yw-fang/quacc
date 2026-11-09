@@ -15,9 +15,17 @@ results = epc_postprocess_flow(
     mu_stars=(0.10, 0.13),
     job_params={
         "q2r_job": {"input_data": {"input": {"zasr": "simple"}}},
-        "matdyn_job": {"input_data": {"input": {
-            "asr": "simple", "nk1": 32, "nk2": 32, "nk3": 32, "deltae": 1.0,
-        }}},
+        "matdyn_job": {
+            "input_data": {
+                "input": {
+                    "asr": "simple",
+                    "nk1": 32,
+                    "nk2": 32,
+                    "nk3": 32,
+                    "deltae": 1.0,
+                }
+            }
+        },
     },
 )
 # Plain-Python execution; with a workflow engine, consume this after execution.
@@ -99,7 +107,10 @@ particularly `run_ph.py` and `allen_dynes.py`. The reference's low-lambda zero
 fallback and clipping of an invalid second moment are deliberately not used;
 unavailable formula results remain distinguishable from physical zero.
 
-Tests use gzip-compressed saved MgB2 q4 spectra and check all ten broadenings and
-three mu values against the saved method-matched estimates (relative tolerance
-2e-7), along with units, signed data, missing files, staging, customization and
-strict JSON serialization. These parser tests do not launch QE.
+Tests keep one complete gzip-compressed MgB2 q4 spectrum and check three mu
+values against independently saved method-matched estimates (relative tolerance
+2e-7). Tiny native frequency/DOS excerpts and hand-written synthetic tables cover
+units, signed data, mode columns, incomplete/ambiguous files, broadening discovery,
+staging, customization and strict JSON serialization. Parser and mocked recipe
+tests do not launch QE. Full multi-broadening benchmark outputs are not required
+for the unit tests.

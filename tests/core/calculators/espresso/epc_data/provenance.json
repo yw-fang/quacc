@@ -1,59 +1,29 @@
 {
   "material": "MgB2",
   "source": "saved QE7.5 PBEsol q4 benchmark, no new DFPT",
+  "broadening_Ry": 0.025,
+  "frequency_unit": "Ry for a2F, cm^-1 for frequencies/DOS",
   "files": {
-    "a2F.dos1": {
-      "sha256": "0f0cb1322b5864cb9808ff9057322c90cb0ddca27703a8bebda1cf4cdc74d5d9",
-      "bytes": 146366
-    },
-    "a2F.dos10": {
-      "sha256": "83dc8cdc9b8a14ae11421e48d7798230f3b0d58c893a8c530401102ee70712ae",
-      "bytes": 146366
-    },
-    "a2F.dos2": {
-      "sha256": "07afca211bab1bc8c2f182c21c510e68c07433617dd60ebab6736626e03814e2",
-      "bytes": 146366
-    },
-    "a2F.dos3": {
-      "sha256": "7281e1e27cf5d4686cbf4f787c17c33793d4da1bc525b63d3334ca7b0daf13d8",
-      "bytes": 146366
-    },
-    "a2F.dos4": {
-      "sha256": "41ceee23762e4597d57f6b6878a3d091247af2465a812e863e9b30d1092d7674",
-      "bytes": 146366
-    },
     "a2F.dos5": {
-      "sha256": "ed0a0d19889bbcc659540c011791759944c90c0e9630752a59628a421e206999",
-      "bytes": 146366
-    },
-    "a2F.dos6": {
-      "sha256": "174438e8c089dc8ab919ede589a05218ff97c5c727c9990c5ee382a4c45ea9a9",
-      "bytes": 146366
-    },
-    "a2F.dos7": {
-      "sha256": "de31e455fa6a29f4e5fbcbe9ee6d14cb69f27929f9ae7179003f1a121e5cda47",
-      "bytes": 146366
-    },
-    "a2F.dos8": {
-      "sha256": "049345d3a68532bb6422069573944a0e97c1b807d3599e798054421b0146dbca",
-      "bytes": 146366
-    },
-    "a2F.dos9": {
-      "sha256": "1a921b2bd1858907c8f4777d65a9588cd206a233fb8d085a7135e36d1161a709",
-      "bytes": 146366
+      "fixture": "a2F.dos5.gz",
+      "sha256_uncompressed": "ed0a0d19889bbcc659540c011791759944c90c0e9630752a59628a421e206999",
+      "bytes_uncompressed": 146366,
+      "original_sha256": "ed0a0d19889bbcc659540c011791759944c90c0e9630752a59628a421e206999",
+      "scope": "complete spectrum"
     },
     "matdyn.freq": {
-      "sha256": "47ac61089daf5021e091c91f7b666198aa29a40657ecc230ef39dd3ecc216cb9",
-      "bytes": 247991
+      "fixture": "matdyn.freq",
+      "sha256_uncompressed": "2c50c2388abcfb3203dbf9cb6a6a50b276644293154945c4f772fed7b0c846ab",
+      "bytes_uncompressed": 312,
+      "original_sha256": "47ac61089daf5021e091c91f7b666198aa29a40657ecc230ef39dd3ecc216cb9",
+      "scope": "first two q-points; nks adjusted"
     },
     "matdyn.dos": {
-      "sha256": "aaed31a4b19dc734650c57bcb22ccb019441d30c243bee5a34b0e194db818ba4",
-      "bytes": 59305
-    },
-    "lambda": {
-      "sha256": "1f25ad045624ba9a36bdb3b080b536ac8124b97a3f76d2c9766948bb635ab5f2",
-      "bytes": 867
+      "fixture": "matdyn.dos",
+      "sha256_uncompressed": "c3fda434fe0175dd5dd09c5bb31fe630eefbeebf650298f6f607980edd9c33fd",
+      "bytes_uncompressed": 248,
+      "original_sha256": "aaed31a4b19dc734650c57bcb22ccb019441d30c243bee5a34b0e194db818ba4",
+      "scope": "header and first three frequency rows; not a normalized DOS"
     }
-  },
-  "frequency_unit": "Ry for a2F, cm^-1 for frequencies/DOS"
+  }
 }

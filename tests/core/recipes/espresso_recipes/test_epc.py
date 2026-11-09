@@ -25,11 +25,11 @@ import json, sys
 sys.modules['matplotlib'] = None
 from quacc.recipes.espresso.epc import epc_analysis_job
 r = epc_analysis_job(
-    {'epc_input_manifest': {'broadenings_Ry': [.005*i for i in range(1,11)]}},
+    {},
     {'dir_name': sys.argv[1]},
 )
 json.dumps(r, allow_nan=False)
-print(len(r['spectra']))
+print(sum('alpha2F' in s for s in r['spectra']))
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(DATA)],
@@ -37,7 +37,7 @@ print(len(r['spectra']))
         capture_output=True,
         text=True,
     )
-    assert result.stdout.strip() == "10"
+    assert result.stdout.strip() == "1"
 
 
 @pytest.mark.parametrize("compressed", [False, True])
@@ -93,9 +93,15 @@ def test_epc_flow_staging_and_customization(
         else:
             assert (target / "q2r.fc").is_file()
             assert calc_swaps["input_data"]["input"]["nk1"] == 6
-            for name in ["matdyn.freq", "matdyn.dos", "a2F.dos1", "a2F.dos2"]:
-                (target / name).write_bytes(
-                    gzip.decompress((DATA / (name + ".gz")).read_bytes())
+            (target / "matdyn.freq").write_text(
+                " &plot nbnd=3, nks=1 /\n0 0 0\n0 1 2\n"
+            )
+            (target / "matdyn.dos").write_text(
+                "# Frequency[cm^-1] DOS\n0 0\n1 3\n2 0\n"
+            )
+            for i, scale in [(1, 1), (2, 2)]:
+                (target / f"a2F.dos{i}").write_text(
+                    f"# frequencies in Ry\n1 {0.2 * scale}\n2 {0.4 * scale}\n3 {0.6 * scale}\n"
                 )
         return {
             "dir_name": str(target),
@@ -123,7 +129,8 @@ def test_epc_flow_staging_and_customization(
     assert calls == ["q2r", "matdyn", "epc_analysis_job"]
     result = output["epc_results"]
     assert len(result["spectra"]) == 2
-    assert result["spectra"][0]["broadening_Ry"] == 0.005
+    assert [s["broadening_Ry"] for s in result["spectra"]] == [0.005, 0.01]
+    assert [s["lambda"] for s in result["spectra"]] == pytest.approx([0.8, 1.6])
     assert result["mu_stars"] == [0.13]
     assert result["settings"]["matdyn"]["source_path"] == str(tmp_path / "matdyn")
     assert result["input_provenance"]["DFPT"]["qmesh"] == [1, 1, 1]
@@ -138,3 +145,30 @@ def test_q2r_custom_prefix_is_not_overwritten(tmp_path: Path) -> None:
     )
     assert result["input_data"]["input"]["fildyn"] == "qe.dyn"
     assert result["input_data"]["input"]["flfrc"] == "q2r.fc"
+
+
+@pytest.mark.parametrize("binary", ["q2r", "matdyn"])
+def test_non_epc_source_and_legacy_copy_files(
+    tmp_path: Path, monkeypatch: Any, binary: str
+) -> None:
+    calls = []
+
+    def capture(**kwargs: Any) -> dict:
+        calls.append(kwargs)
+        return kwargs
+
+    monkeypatch.setattr(phonons, "run_and_summarize", capture)
+    recipe = getattr(phonons, f"{binary}_job")
+    extra_files = [{"source": tmp_path / "extra", "filenames": "input"}]
+    # The original positional copy_files API still works without EPC validation.
+    recipe(extra_files)
+    assert calls[-1]["copy_files"] == extra_files
+    recipe(copy_files=extra_files, source_directory=tmp_path)
+    assert calls[-1]["copy_files"] == [
+        {
+            "source": tmp_path,
+            "filenames": ["matdyn[0-9]*" if binary == "q2r" else "q2r.fc*"],
+        },
+        *extra_files,
+    ]
+    assert "epc_input_manifest" not in calls[-1]["additional_fields"]

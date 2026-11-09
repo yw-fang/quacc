@@ -92,12 +92,12 @@ def _unit(text: str, supplied: str | None) -> str:
         (
             unit
             for pattern, unit in [
-                (r"Rydberg|\bRy\b", "Ry"),
+                (r"(?i:Rydberg)|\bRy\b", "Ry"),
                 (r"cm\^?-1", "cm^-1"),
                 (r"\bmeV\b", "meV"),
                 (r"\beV\b", "eV"),
             ]
-            if re.search(pattern, header, re.IGNORECASE)
+            if re.search(pattern, header)
         ),
         None,
     )
@@ -169,6 +169,8 @@ def read_matdyn_frequencies(
     if frequency_unit not in _UNITS:
         raise ValueError(f"Unsupported frequency unit: {frequency_unit}")
     lines = [line.strip() for line in _text(path).splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("Missing nbnd in empty matdyn frequency file")
     nbnd = re.search(r"nbnd\s*=\s*(\d+)", lines[0])
     nks = re.search(r"nks\s*=\s*(\d+)", lines[0])
     if not nbnd or int(nbnd[1]) < 1:
@@ -177,7 +179,7 @@ def read_matdyn_frequencies(
     points, weights, frequencies = [], [], []
     i = 1
     while i < len(lines):
-        point = [float(x.replace("D", "E")) for x in lines[i].split()]
+        point = [float(x.replace("D", "E").replace("d", "e")) for x in lines[i].split()]
         if len(point) not in (3, 4):
             raise ValueError("Expected three q coordinates and an optional weight")
         points.append(point[:3])
@@ -185,7 +187,9 @@ def read_matdyn_frequencies(
         i += 1
         values: list[float] = []
         while len(values) < modes and i < len(lines):
-            values.extend(float(x.replace("D", "E")) for x in lines[i].split())
+            values.extend(
+                float(x.replace("D", "E").replace("d", "e")) for x in lines[i].split()
+            )
             i += 1
         if len(values) != modes:
             raise ValueError("Incomplete/malformed matdyn frequency block")
@@ -385,6 +389,8 @@ def epc_file_manifest(
         broadenings in Ry read from QE metadata (not guessed from filenames).
     """
     directory = Path(directory).expanduser().resolve()
+    if stage not in ("q2r", "matdyn"):
+        raise ValueError("stage must be q2r or matdyn")
     if Path(dynamical_prefix).name != dynamical_prefix:
         raise ValueError("Dynamical matrix prefix must be a basename")
     elph = directory / "elph_dir"
@@ -402,6 +408,8 @@ def epc_file_manifest(
     ):
         raise ValueError("Inconsistent/missing EPC broadening metadata")
     broadenings = [float(value.replace("D", "E")) for value in broadening_sets[0]]
+    if any(not np.isfinite(value) or value <= 0 for value in broadenings):
+        raise ValueError("EPC broadenings must be finite positive values")
     files = list(metadata)
     if stage == "q2r":
         lines = _text(directory / f"{dynamical_prefix}0").splitlines()
@@ -421,15 +429,17 @@ def epc_file_manifest(
         for p in elph.glob("a2Fq2r.*"):
             match = re.fullmatch(r"a2Fq2r\.(\d+)\.(\d+)(?:\.gz)?", p.name)
             if match:
-                pairs[int(match[1]), int(match[2])] = p
+                key = int(match[1]), int(match[2])
+                if key in pairs:
+                    raise ValueError(f"Ambiguous duplicate EPC input: {p.name}")
+                pairs[key] = p
         codes = sorted({code for code, _ in pairs})
-        if len(codes) != len(broadenings) or any(
-            (code, q) not in pairs for code in codes for q in range(1, nq + 1)
-        ):
+        expected_pairs = {(code, q) for code in codes for q in range(1, nq + 1)}
+        if len(codes) != len(broadenings) or pairs.keys() != expected_pairs:
             raise ValueError("Incomplete DFPT EPC q-point/broadening series")
         files.extend(pairs.values())
         names = [f"{dynamical_prefix}[0-9]*", "elph_dir"]
-    elif stage == "matdyn":
+    else:
         grid = None
         files.append(Path(zpath(directory / "q2r.fc")))
         transformed = [
@@ -439,10 +449,11 @@ def epc_file_manifest(
         ]
         if len(transformed) != len(broadenings):
             raise ValueError("Incomplete q2r EPC force-constant broadening series")
+        codes = [int(p.name.removesuffix(".gz").split(".")[-1]) for p in transformed]
+        if len(set(codes)) != len(codes):
+            raise ValueError("Ambiguous duplicate q2r EPC force constants")
         files.extend(transformed)
         names = ["q2r.fc*", "elph_dir"]
-    else:
-        raise ValueError("stage must be q2r or matdyn")
     return {
         "source_directory": str(directory),
         "filenames": names,
