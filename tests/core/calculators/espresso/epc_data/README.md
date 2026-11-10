@@ -2,10 +2,12 @@
 
 These are small software-regression fixtures, **not converged superconductivity
 benchmarks**. Reference moments and Tc values are written inline in `test_epc.py`.
-They come from independently running `autoph/allen_dynes.py` in
-[hyllios/utils](https://github.com/hyllios/utils/tree/4e86e82ae2eec3762f66e6228a70f67b69570789)
-at commit `4e86e82`. The 2e-7 relative tolerance locks in the same algorithm. It is
-not an accuracy bound on quadrature, convergence or Tc. All gzip mtimes are zero.
+They were computed using an independent implementation of the spectral-moment
+and Tc estimation methods implemented in Gao et al.,
+[*Nat Commun* **16**, 8253 (2025)](https://doi.org/10.1038/s41467-025-63702-w).
+These fixture-specific values are not results reported in that paper. The 2e-7
+relative tolerance checks agreement between implementations; it is not an accuracy
+bound on quadrature, convergence or Tc. All gzip mtimes are zero.
 
 ## `pb/`: one-atom fcc Pb, strong coupling
 
@@ -26,8 +28,7 @@ irreducible q-points of a 3×3×3 grid, and two broadenings: 0.0025 and 0.005 Ry
 QE prints 0.0025 as `0.003` in `elph.inp_lambda`, which exercises the
 full-precision broadening path.
 
-How the data was generated (following the
-[ICTP Pb tutorial](https://indico.ictp.it/event/8301/session/96/contribution/534/material/0/0.pdf)):
+The data was generated with the following settings:
 
 - Potential: scalar-relativistic PZ `pb_s.UPF` (sha256 `24fe8cc9…d27af`). SOC is
   omitted.

@@ -22,9 +22,8 @@ from quacc.calculators.espresso.epc import (
 DATA = Path(__file__).parent / "epc_data"
 PB = DATA / "pb"
 
-# Independent reference values from hyllios/utils autoph/allen_dynes.py
-# (commit 4e86e82ae2eec3762f66e6228a70f67b69570789); see epc_data/README.md.
-# The 2e-7 relative tolerance locks the same algorithm; it is not an accuracy bound.
+# Independently computed reference values; see epc_data/README.md for method details.
+# The 2e-7 relative tolerance checks agreement; it is not an accuracy bound.
 PB_MOMENTS = {
     "lambda": 7.875436476796867,
     "omega_log_K": 64.2876372164752,

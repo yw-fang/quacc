@@ -40,8 +40,9 @@ Unavailable estimates are null with reasons. Sampled instability and large lambd
 are flagged, not silently clipped or rejected. A negative lambda fraction below
 1e-6 is retained diagnostically without changing the status by itself.
 
-Moments use Simpson integration over positive frequencies, following
-[hyllios/utils](https://github.com/hyllios/utils/tree/4e86e82ae2eec3762f66e6228a70f67b69570789/autoph).
+Moments use Simpson integration over positive frequencies. For an implementation
+of the spectral-moment and Tc estimation methods, see Gao et al.,
+[*Nat Commun* **16**, 8253 (2025)](https://doi.org/10.1038/s41467-025-63702-w).
 QE's footer instead uses its bin-centred midpoint sum, including signed frequency
 bins. Both comparisons and the distinct QE q-sum are retained; disagreement does
 not establish convergence. Rounded q-sum widths are matched at 5e-5 Ry precision;

@@ -1,8 +1,14 @@
 """Parsers and isotropic formula-based analysis of QE interpolated EPC data.
 
-Moments and Tc expressions follow hyllios/utils ``autoph/allen_dynes.py``
-(commit 4e86e82). Simpson integration differs from QE's bin-centred midpoint
-footer. These estimates are not numerical Eliashberg solutions.
+Spectral moments summarize the Eliashberg function alpha2F: lambda is the
+dimensionless coupling strength, omega_log is the coupling-weighted logarithmic
+average frequency, and omega_2 is the square root of the weighted second moment.
+The two characteristic frequencies are reported in kelvin.
+
+Tc estimates use the modified McMillan and Allen-Dynes expressions;
+see Gao et al., Nat Commun 16, 8253 (2025), doi:10.1038/s41467-025-63702-w,
+for an implementation of these methods. Simpson integration differs from QE's
+bin-centred midpoint footer. These estimates are not numerical Eliashberg solutions.
 """
 
 from __future__ import annotations
@@ -314,6 +320,13 @@ def analyze_a2f(
 ) -> A2FSpectrumSchema:
     """Integrate signed moments and evaluate each Tc method in its own domain.
 
+    Here, moments are weighted integrals of alpha2F, not magnetic moments:
+    lambda = 2 * integral(alpha2F / omega), omega_log in kelvin is the corresponding
+    logarithmic average frequency setting the characteristic frequency scale in the Tc formulas,
+     and omega_2 is the square root of the coupling-weighted second frequency moment in kelvin,
+     used in the Allen-Dynes corrections. The modified McMillan formula uses only lambda and 
+     omega_log, while Allen-Dynes also requires a valid second moment. The Tc estimates are not numerical Eliashberg solutions.
+
     Parameters
     ----------
     spectrum
@@ -326,7 +339,8 @@ def analyze_a2f(
     Returns
     -------
     A2FSpectrumSchema
-        Signed spectrum, finite moments in K or null, diagnostics and explicit Tc
+        Signed spectrum, dimensionless lambda, frequency moments in K or null,
+        diagnostics and explicit Tc
         records. Negative-weight status tolerance is a lambda fraction of 1e-6;
         smaller signed residuals remain recorded. Lambda above 5 is flagged only.
     """
