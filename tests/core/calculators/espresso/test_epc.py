@@ -1,4 +1,4 @@
-"""Offline EPC regression against preserved QE7.5 one-atom Pb spectra."""
+"""Offline EPC regressions against preserved QE 7.5 one-atom spectra."""
 
 from __future__ import annotations
 
@@ -20,6 +20,33 @@ from quacc.calculators.espresso.epc import (
 )
 
 DATA = Path(__file__).parent / "epc_data"
+
+
+def test_al_example03_spectrum_regression() -> None:
+    """Official Al example covers weak coupling and signed mode columns."""
+    directory = DATA / "al_example03"
+    expected = json.loads((directory / "expected.json").read_text())
+    spectrum = analyze_a2f(
+        read_a2f(directory / "a2F.dos10.gz"), mu_stars=(expected["mu_star"],)
+    )
+    for key in ["lambda", "omega_log_K", "omega_2_K"]:
+        assert spectrum[key] == pytest.approx(expected[key], rel=2e-7)
+    for tc, field in zip(
+        spectrum["Tc"], ["McMillan_omega_log_K", "Allen_Dynes_K"], strict=True
+    ):
+        assert tc["Tc_K"] == pytest.approx(expected[field], rel=2e-7)
+        assert tc["status"] == "estimated"
+    assert 0 < spectrum["lambda"] < 0.5
+    assert np.shape(spectrum["alpha2F_modes"]) == (50, 3)
+    assert np.any(np.asarray(spectrum["alpha2F_modes"]) < 0)
+    assert all(value >= 0 for value in spectrum["alpha2F"])
+    assert "large_lambda_formula_regime" not in spectrum["warnings"]
+    assert abs(spectrum["qe_midpoint_footer_difference"]) < 1e-3
+    # Different coarse-bin quadratures remain distinct, with a diagnostic.
+    assert (
+        "Simpson_positive_frequency_vs_QE_midpoint_disagreement" in spectrum["warnings"]
+    )
+    assert json.loads(json.dumps(spectrum, allow_nan=False)) == spectrum
 
 
 @pytest.mark.parametrize("mu_star", [0.10, 0.13, 0.15])

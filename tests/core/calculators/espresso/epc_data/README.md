@@ -1,4 +1,6 @@
-# Minimal QE 7.5 Pb EPC fixtures
+# Minimal QE 7.5 EPC fixtures
+
+## Pb: native staging and strong-coupling regression
 
 `pb_dfpt/` contains a complete one-atom fcc Pb DFPT/EPC source: four irreducible
 q-points of a 3×3×3 grid and two broadenings (0.0025 and 0.005 Ry). Its 17 files
@@ -35,3 +37,19 @@ Small synthetic tables in the tests exercise missing/malformed/ambiguous data,
 wrong file identities, units, signed moments, independent formula domains and
 numerical limits. Mocked flow tests check customization and backward compatibility;
 the separate native test verifies the actual QE file-transfer and executable path.
+
+## Al: official example03 weak-coupling regression
+
+`al_example03/a2F.dos10.gz` is the complete 50-bin, three-mode spectrum at
+0.050 Ry broadening from QE's `PHonon/examples/example03` (one-atom fcc Al).
+Independent native and QuAcc SCF/DFPT/postprocessing runs with the same QE 7.5
+executable and potential produced identical saved spectra and frequencies.
+Its companion `expected.json` contains the input settings, uncompressed hash,
+potential identity and independently executed hyllios reference moments/Tc at
+mu-star=0.10. This is a same-method software regression, not a converged Tc.
+Signed mode columns are retained even when the total spectrum is nonnegative.
+
+Only this small spectrum is added; the full Al DFPT source, wavefunctions,
+potential, plots and machine-specific drivers are not bundled. Pb remains the
+smaller native fixture and tests the 0.0025 Ry rounding case absent from the
+standard Al example. Replacing it with Al would lose that regression coverage.
