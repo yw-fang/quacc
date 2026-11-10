@@ -730,6 +730,74 @@ if TYPE_CHECKING:
         q2r_job: RunSchema
         matdyn_job: RunSchema
 
+    class TcEstimateSchema(TypedDict):
+        method: str
+        mu_star: float
+        Tc_K: float | None
+        status: str
+        reason: str | None
+        warnings: list[str]
+        f1: NotRequired[float | None]
+        f2: NotRequired[float | None]
+
+    A2FSpectrumSchema = TypedDict(
+        "A2FSpectrumSchema",
+        {
+            "index": int,
+            "broadening_Ry": float | None,
+            "status": str,
+            "reason": str,
+            "frequency": list[float],
+            "frequency_unit": str,
+            "alpha2F": list[float],
+            "alpha2F_modes": list[list[float]],
+            "mode_indices": list[int],
+            "mode_lambda": list[float | None],
+            "mode_sum_max_abs_error": float | None,
+            "spectral_normalization": str,
+            "qe_footer_lambda": float | None,
+            "qe_footer_lambda_difference": float | None,
+            "qe_footer_delta_frequency": float | None,
+            "qe_midpoint_lambda": float | None,
+            "qe_midpoint_footer_difference": float | None,
+            "omega_log_K": float | None,
+            "omega_2_K": float | None,
+            "Tc": list[TcEstimateSchema],
+            "diagnostics": list[str],
+            "warnings": list[str],
+            "negative_lambda_fraction": float | None,
+            "negative_lambda_fraction_threshold": float,
+            "source": dict[str, Any],
+            "qe_qsum": dict[str, Any],
+            "lambda": float | None,
+            "lambda_positive_part": float | None,
+            "lambda_negative_part": float | None,
+        },
+        total=False,
+    )
+
+    class EPCResultSchema(TypedDict):
+        schema_version: int
+        status: str
+        directory: str
+        method_scope: str
+        mu_stars: list[float]
+        spectra: list[A2FSpectrumSchema]
+        diagnostics: list[dict[str, Any]]
+        frequencies: dict[str, Any] | None
+        phonon_dos: dict[str, Any] | None
+        instability: dict[str, Any] | None
+        imaginary_tolerance_cm1: float
+        qe_qsum: list[dict[str, Any]]
+        qe_qsum_source: NotRequired[dict[str, Any]]
+        settings: NotRequired[dict[str, str]]
+        input_provenance: NotRequired[dict[str, Any]]
+
+    class EspressoEPCSchema(TypedDict):
+        q2r_job: RunSchema
+        matdyn_job: RunSchema
+        epc_results: EPCResultSchema
+
     class NebSchema(TypedDict):
         relax_reactant: OptSchema
         relax_product: OptSchema

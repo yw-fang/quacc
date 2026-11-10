@@ -19,6 +19,7 @@ nav = [
             "user/recipes/recipes_intro.md",
             "user/recipes/workflows.md",
             "user/recipes/file_transfers.md",
+            "user/recipes/espresso_epc.md",
             "user/recipes/mlip_recipes.md",
             "user/recipes/database_recipes.md",
         ] },

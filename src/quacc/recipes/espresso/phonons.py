@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from ase.io.espresso import Namelist
 
 from quacc import Job, flow, job, subflow
+from quacc.calculators.espresso.epc import epc_copy_files, epc_file_manifest
 from quacc.calculators.espresso.espresso import EspressoTemplate
 from quacc.calculators.espresso.utils import grid_copy_files, grid_prepare_repr
 from quacc.recipes.espresso._base import run_and_summarize
@@ -111,8 +112,9 @@ def phonon_job(
 
 @job
 def q2r_job(
-    copy_files: CopyFiles,
+    copy_files: CopyFiles | None = None,
     additional_fields: dict[str, Any] | None = None,
+    source_directory: SourceDirectory | None = None,
     **calc_kwargs: Any,
 ) -> RunSchema:
     """
@@ -130,6 +132,10 @@ def q2r_job(
         directory and the `filenames` to copy. Glob patterns are supported.
     additional_fields
         Additional fields to add to the results dictionary.
+    source_directory
+        Completed DFPT directory. Automatically stage dynamical matrices and,
+        for ``la2f=True``, validate/stage the full EPC grid and ``elph_dir``.
+        Sources are copied, never modified. Extra copy_files are also accepted.
     **calc_kwargs
         Additional keyword arguments to pass to the Espresso calculator. Set a value to
         `quacc.Remove` to remove a pre-existing key entirely. See the docstring of
@@ -141,19 +147,48 @@ def q2r_job(
         Dictionary of results from [quacc.schemas.ase.Summarize.run][].
         See the type-hint for the data structure.
     """
+    fields: dict[str, Any] = {}
+    data = dict(calc_kwargs.get("input_data") or {})
+    if "la2f" in data:
+        raise ValueError("q2r la2f must be nested under input_data['input']")
+    inp = Namelist(data)
+    inp.to_nested(binary="q2r")
+    if not isinstance(inp.get("input", {}).get("la2f", False), bool):
+        raise ValueError("la2f must be a Python boolean")
+    if source_directory is not None:
+        if inp.get("input", {}).get("la2f", False):
+            manifest = epc_file_manifest(
+                source_directory, "q2r", inp["input"].get("fildyn", "matdyn")
+            )
+            names = manifest["filenames"]
+            count = len(manifest["broadenings_Ry"])
+            if inp["input"].get("el_ph_nsigma", count) != count:
+                raise ValueError("el_ph_nsigma disagrees with the validated EPC series")
+            inp["input"]["el_ph_nsigma"] = count
+            calc_kwargs["input_data"] = inp
+            fields["epc_input_manifest"] = manifest
+        else:
+            names = [f"{inp.get('input', {}).get('fildyn', 'matdyn')}[0-9]*"]
+        copy_files = epc_copy_files(
+            source_directory,
+            names,
+            copy_files,
+            inp.get("input", {}).get("fildyn", "matdyn"),
+        )
     return run_and_summarize(
         template=EspressoTemplate("q2r"),
         calc_defaults={},
         calc_swaps=calc_kwargs,
-        additional_fields={"name": "q2r.x Phonon"} | (additional_fields or {}),
+        additional_fields={"name": "q2r.x Phonon"} | fields | (additional_fields or {}),
         copy_files=copy_files,
     )
 
 
 @job
 def matdyn_job(
-    copy_files: CopyFiles,
+    copy_files: CopyFiles | None = None,
     additional_fields: dict[str, Any] | None = None,
+    source_directory: SourceDirectory | None = None,
     **calc_kwargs: Any,
 ) -> RunSchema:
     """
@@ -172,6 +207,10 @@ def matdyn_job(
         directory and the `filenames` to copy. Glob patterns are supported.
     additional_fields
         Additional fields to add to the results dictionary.
+    source_directory
+        Completed q2r directory. Automatically stage force constants and,
+        for ``la2f=True``, validate/stage EPC transforms in ``elph_dir``.
+        Sources are copied, never modified. Extra copy_files are also accepted.
     **calc_kwargs
         Additional keyword arguments to pass to the Espresso calculator. Set a value to
         `quacc.Remove` to remove a pre-existing key entirely. See the docstring of
@@ -183,11 +222,39 @@ def matdyn_job(
         Dictionary of results from [quacc.schemas.ase.Summarize.run][].
         See the type-hint for the data structure.
     """
+    fields: dict[str, Any] = {}
+    data = dict(calc_kwargs.get("input_data") or {})
+    if "la2f" in data:
+        raise ValueError("matdyn la2f must be nested under input_data['input']")
+    inp = Namelist(data)
+    inp.to_nested(binary="matdyn")
+    if not isinstance(inp.get("input", {}).get("la2f", False), bool):
+        raise ValueError("la2f must be a Python boolean")
+    if source_directory is not None:
+        if inp.get("input", {}).get("la2f", False):
+            manifest = epc_file_manifest(source_directory, "matdyn")
+            names = manifest["filenames"]
+            count = len(manifest["broadenings_Ry"])
+            if inp["input"].get("el_ph_nsigma", count) != count:
+                raise ValueError("el_ph_nsigma disagrees with the validated EPC series")
+            inp["input"]["el_ph_nsigma"] = count
+            calc_kwargs["input_data"] = inp
+            fields["epc_input_manifest"] = manifest
+        else:
+            names = ["q2r.fc*"]
+        copy_files = epc_copy_files(
+            source_directory,
+            names,
+            copy_files,
+            inp.get("input", {}).get("fildyn", "matdyn"),
+        )
     return run_and_summarize(
         template=EspressoTemplate("matdyn"),
         calc_defaults={},
         calc_swaps=calc_kwargs,
-        additional_fields={"name": "matdyn.x Phonon"} | (additional_fields or {}),
+        additional_fields={"name": "matdyn.x Phonon"}
+        | fields
+        | (additional_fields or {}),
         copy_files=copy_files,
     )
 

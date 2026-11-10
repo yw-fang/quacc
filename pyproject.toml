@@ -33,6 +33,7 @@ dependencies = [
     "frozendict>=2.4.6", # for caching of dictionaries in @lru_cache
     "monty>=2024.5.15", # miscellaneous Python utilities
     "numpy>=1.25.0", # for array handling
+    "scipy>=1.11.0", # for numerical EPC quadrature and physical constants
     "psutil", # for getting compute architecture details
     "pydantic>=2.0.1", # for settings management
     "pydantic-settings>=2.2.0", # for settings management

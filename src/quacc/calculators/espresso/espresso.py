@@ -117,6 +117,18 @@ class EspressoTemplate(EspressoTemplate_):
         self._output_handler(parameters, directory)
         parameters = self._sanity_checks(parameters)
 
+        if self.binary == "q2r" and parameters.get("input_data", {}).get(
+            "input", {}
+        ).get("la2f"):
+            # copy/copytree retain read-only source modes. Only the private staged
+            # tree is made writable so q2r can create its transformed EPC files.
+            elph = directory / "elph_dir"
+            for path in [elph, *elph.rglob("*")]:
+                if path.exists() and not path.is_symlink():
+                    path.chmod(
+                        path.stat().st_mode | 0o200 | (0o100 if path.is_dir() else 0)
+                    )
+
         if self.outdir:
             safe_decompress_dir(self.outdir)
 
@@ -306,6 +318,16 @@ class EspressoTemplate(EspressoTemplate_):
 
         espresso_outdir = Path(self.outdir or directory).expanduser().resolve()
         outkeys = espresso_prepare_dir(espresso_outdir, self.binary)
+
+        if self.binary == "q2r":
+            # Completed DFPT sources need not use QuAcc's default matrix prefix.
+            fildyn = parameters.get("input_data", {}).get("input", {}).get("fildyn")
+            if fildyn is not None:
+                if not re.fullmatch(r"[\w.-]+", str(fildyn)) or fildyn in (".", ".."):
+                    raise ValueError(
+                        "q2r fildyn must be a basename without glob characters"
+                    )
+                outkeys["input"].pop("fildyn", None)
 
         input_data = parameters.get("input_data", {})
         input_data = recursive_dict_merge(input_data, outkeys, verbose=True)

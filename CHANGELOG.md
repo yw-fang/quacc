@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project generally adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added QE interpolated-EPC postprocessing from completed DFPT sources, with broadening-resolved moments and formula-based Tc estimates.
+
+### Changed
+
+- q2r jobs preserve a custom dynamical-matrix basename instead of forcing `matdyn`.
+
 ## [1.8.2]
 
 ### Added
