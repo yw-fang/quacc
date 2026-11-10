@@ -43,7 +43,9 @@ if TYPE_CHECKING:
     from quacc.utils.files import find_recent_logfile
 
     def check_epc_api(source: Path, q2r: RunSchema, matdyn: RunSchema) -> None:
-        output = epc_postprocess_flow(source, mu_stars=(0.1,))
+        output = epc_postprocess_flow(
+            source, mu_stars=(0.1,), imaginary_mode_policy="skip_tc"
+        )
         assert_type(output, EspressoEPCSchema)
         assert_type(output["epc_results"], EPCResultSchema)
         assert_type(epc_analysis_job(q2r, matdyn), EPCResultSchema)

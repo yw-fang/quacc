@@ -6,7 +6,7 @@ import gzip
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -27,8 +27,12 @@ def test_analysis_without_plotting(monkeypatch: Any) -> None:
 
 
 @pytest.mark.parametrize("compressed", [False, True])
+@pytest.mark.parametrize("policy", ["warn", "skip_tc"])
 def test_epc_flow_staging_and_customization(
-    tmp_path: Path, monkeypatch: Any, compressed: bool
+    tmp_path: Path,
+    monkeypatch: Any,
+    compressed: bool,
+    policy: Literal["warn", "skip_tc"],
 ) -> None:
     source = tmp_path / "completed_dfpt"
     source.mkdir()
@@ -111,6 +115,7 @@ def test_epc_flow_staging_and_customization(
     output = epc.epc_postprocess_flow(
         source,
         mu_stars=(0.13,),
+        imaginary_mode_policy=policy,
         job_params={
             "q2r_job": {"input_data": {"input": {"fildyn": "custom.dyn"}}},
             "matdyn_job": {"input_data": {"input": {"nk1": 6}}},
@@ -123,6 +128,7 @@ def test_epc_flow_staging_and_customization(
     assert [s["broadening_Ry"] for s in result["spectra"]] == [0.005, 0.01]
     assert [s["lambda"] for s in result["spectra"]] == pytest.approx([0.8, 1.6])
     assert result["mu_stars"] == [0.13]
+    assert result["imaginary_mode_policy"] == policy
     assert "6" in result["settings"]["matdyn"]
     assert result["status"] == "analyzed"
     assert result["input_provenance"]["DFPT"]["qmesh"] == [1, 1, 1]
@@ -250,6 +256,8 @@ def test_native_pb_epc_postprocess(tmp_path: Path, compressed_source: bool) -> N
     [
         {"mu_stars": (-0.1,)},
         {"imaginary_tolerance_cm1": -1},
+        {"imaginary_mode_policy": "ignore"},
+        {"job_params": {"epc_analysis_job": {"imaginary_mode_policy": "ignore"}}},
         {"job_params": {"all": {"input_data": {}}}},
         {"job_params": {"epc_analysis_job": {"mu_stars": ()}}},
         {"job_params": {"q2r_job": {"input_data": {"la2f": True}}}},
@@ -265,9 +273,14 @@ def test_flow_settings_fail_before_solver_calls(
     monkeypatch.setattr(phonons, "run_and_summarize", forbidden)
     expected = (
         "mu_stars"
-        if "mu_stars" in kwargs or "epc_analysis_job" in kwargs.get("job_params", {})
+        if "mu_stars" in kwargs
+        or "mu_stars" in kwargs.get("job_params", {}).get("epc_analysis_job", {})
         else "Imaginary-frequency"
         if "imaginary_tolerance_cm1" in kwargs
+        else "imaginary_mode_policy"
+        if "imaginary_mode_policy" in kwargs
+        or "imaginary_mode_policy"
+        in kwargs.get("job_params", {}).get("epc_analysis_job", {})
         else "unsupported"
         if "all" in kwargs.get("job_params", {})
         else "nested"

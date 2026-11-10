@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Added QE interpolated-EPC postprocessing from completed DFPT sources, with broadening-resolved moments and formula-based Tc estimates.
+- Added configurable imaginary-mode policies retaining diagnostic Tc by default, with options to suppress Tc evaluation or raise on unstable/unassessed phonons.
 
 ### Changed
 

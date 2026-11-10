@@ -788,6 +788,8 @@ if TYPE_CHECKING:
         phonon_dos: dict[str, Any] | None
         instability: dict[str, Any] | None
         imaginary_tolerance_cm1: float
+        imaginary_mode_policy: Literal["warn", "skip_tc", "raise"]
+        phonon_stability: Literal["unknown", "unstable", "no_sampled_instability"]
         qe_qsum: list[dict[str, Any]]
         qe_qsum_source: NotRequired[dict[str, Any]]
         settings: NotRequired[dict[str, str]]

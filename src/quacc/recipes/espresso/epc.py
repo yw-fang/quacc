@@ -18,7 +18,7 @@ from quacc.wflow_tools.customizers import customize_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import Any
+    from typing import Any, Literal
 
     from quacc.types import (
         EPCResultSchema,
@@ -34,6 +34,8 @@ def epc_analysis_job(
     matdyn_results: RunSchema,
     mu_stars: tuple[float, ...] = (0.10,),
     imaginary_tolerance_cm1: float = 10.0,
+    *,
+    imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> EPCResultSchema:
     """Summarize completed EPC interpolation independently of figures.
 
@@ -47,6 +49,9 @@ def epc_analysis_job(
         Explicit Coulomb pseudopotentials for both formula-based Tc estimates.
     imaginary_tolerance_cm1
         Numerical threshold for sampled imaginary-mode diagnostics.
+    imaginary_mode_policy
+        "warn" retains diagnostic Tc for sampled instability or unknown stability;
+        "skip_tc" suppresses Tc; "raise" raises ValueError before Tc evaluation.
 
     Returns
     -------
@@ -63,6 +68,7 @@ def epc_analysis_job(
         mu_stars=mu_stars,
         broadenings_Ry=source.get("broadenings_Ry"),
         imaginary_tolerance_cm1=imaginary_tolerance_cm1,
+        imaginary_mode_policy=imaginary_mode_policy,
     )
     result["settings"] = {}
     result["input_provenance"] = {
@@ -94,6 +100,8 @@ def epc_postprocess_flow(
     imaginary_tolerance_cm1: float = 10.0,
     job_params: dict[str, Any] | None = None,
     job_decorators: dict[str, Callable | None] | None = None,
+    *,
+    imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> EspressoEPCSchema:
     """Postprocess completed DFPT/EPC data.
 
@@ -112,6 +120,10 @@ def epc_postprocess_flow(
         Coulomb pseudopotentials; results retain every broadening, not a best Tc.
     imaginary_tolerance_cm1
         Numerical instability threshold; does not establish physical stability.
+    imaginary_mode_policy
+        "warn" retains diagnostic Tc for sampled instability or unknown stability;
+        "skip_tc" retains spectra/moments without evaluating Tc; "raise" raises
+        ValueError in analysis. q2r/matdyn outputs remain saved for inspection.
     job_params
         Keyword overrides for q2r_job, matdyn_job and epc_analysis_job, following
         QuAcc's customize_jobs convention. Defaults use la2f, simple ASR and a
@@ -135,7 +147,7 @@ def epc_postprocess_flow(
         raise ValueError(
             "EPC flow job_params['all'] is unsupported; customize named jobs"
         )
-    validate_epc_settings(mu_stars, imaginary_tolerance_cm1)
+    validate_epc_settings(mu_stars, imaginary_tolerance_cm1, imaginary_mode_policy)
 
     defaults: dict[str, dict[str, Any]] = {
         "q2r_job": {"input_data": {"input": {"la2f": True, "zasr": "simple"}}},
@@ -154,12 +166,15 @@ def epc_postprocess_flow(
         "epc_analysis_job": {
             "mu_stars": mu_stars,
             "imaginary_tolerance_cm1": imaginary_tolerance_cm1,
+            "imaginary_mode_policy": imaginary_mode_policy,
         },
     }
     effective = recursive_dict_merge(defaults, job_params or {})
     analysis_settings = effective["epc_analysis_job"]
     validate_epc_settings(
-        analysis_settings["mu_stars"], analysis_settings["imaginary_tolerance_cm1"]
+        analysis_settings["mu_stars"],
+        analysis_settings["imaginary_tolerance_cm1"],
+        analysis_settings["imaginary_mode_policy"],
     )
     for name in ("q2r_job", "matdyn_job"):
         data = effective[name].get("input_data", {})

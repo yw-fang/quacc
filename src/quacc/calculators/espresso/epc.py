@@ -25,7 +25,7 @@ from scipy.integrate import simpson
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Any
+    from typing import Any, Literal
 
     from numpy.typing import NDArray
 
@@ -298,7 +298,9 @@ def read_phonon_dos(
 
 
 def validate_epc_settings(
-    mu_stars: Sequence[float], imaginary_tolerance_cm1: float = 10.0
+    mu_stars: Sequence[float],
+    imaginary_tolerance_cm1: float = 10.0,
+    imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> None:
     """Validate inexpensive analysis settings before scheduling solver jobs.
 
@@ -308,15 +310,23 @@ def validate_epc_settings(
         Nonempty sequence of finite, nonnegative Coulomb pseudopotentials.
     imaginary_tolerance_cm1
         Finite, nonnegative numerical instability threshold.
+    imaginary_mode_policy
+        Retain diagnostic Tc, suppress Tc, or raise for sampled instability or
+        unavailable phonon stability information.
     """
     if not len(mu_stars) or any(not np.isfinite(mu) or mu < 0 for mu in mu_stars):
         raise ValueError("mu_stars must be finite nonnegative values")
     if not np.isfinite(imaginary_tolerance_cm1) or imaginary_tolerance_cm1 < 0:
         raise ValueError("Imaginary-frequency tolerance must be finite and nonnegative")
+    if imaginary_mode_policy not in ("warn", "skip_tc", "raise"):
+        raise ValueError("imaginary_mode_policy must be 'warn', 'skip_tc', or 'raise'")
 
 
 def analyze_a2f(
-    spectrum: A2FSpectrumSchema, mu_stars: Sequence[float] = (0.10,)
+    spectrum: A2FSpectrumSchema,
+    mu_stars: Sequence[float] = (0.10,),
+    *,
+    calculate_tc: bool = True,
 ) -> A2FSpectrumSchema:
     """Integrate signed moments and evaluate each Tc method in its own domain.
 
@@ -336,6 +346,9 @@ def analyze_a2f(
         requires a valid second moment.
     mu_stars
         Finite, nonnegative Coulomb pseudopotentials.
+    calculate_tc
+        If False, retain spectra and moments without evaluating either Tc formula.
+        Tc entries remain null with an explicit disabled reason.
 
     Returns
     -------
@@ -346,6 +359,8 @@ def analyze_a2f(
         smaller signed residuals remain recorded. Lambda above 5 is flagged only.
     """
     validate_epc_settings(mu_stars)
+    if not isinstance(calculate_tc, bool):
+        raise ValueError("calculate_tc must be a Python boolean")
     w_all = np.asarray(spectrum["frequency"], dtype=float)
     a_all = np.asarray(spectrum["alpha2F"], dtype=float)
     if (
@@ -454,7 +469,8 @@ def analyze_a2f(
                 "mu_star": float(mu),
                 "Tc_K": None,
                 "status": "unavailable",
-                "reason": reason or None,
+                "reason": reason
+                or (None if calculate_tc else "Tc_evaluation_disabled"),
                 "warnings": [],
             }
             if (
@@ -749,6 +765,7 @@ def analyze_epc_directory(
     mu_stars: Sequence[float] = (0.10,),
     broadenings_Ry: Sequence[float] | None = None,
     imaginary_tolerance_cm1: float = 10.0,
+    imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> EPCResultSchema:
     """Analyze completed matdyn files with broadening-resolved diagnostics.
 
@@ -763,6 +780,10 @@ def analyze_epc_directory(
         identities remain unknown; the rounded lambda table cannot supply them.
     imaginary_tolerance_cm1
         Numerical sampled-instability threshold, not a physical stability proof.
+    imaginary_mode_policy
+        For sampled imaginary modes or unavailable frequency information, "warn"
+        retains finite Tc with diagnostic status, "skip_tc" omits formula
+        evaluation but retains spectra/moments, and "raise" raises ValueError.
 
     Returns
     -------
@@ -771,7 +792,7 @@ def analyze_epc_directory(
         aggregate diagnostics, native units and source-file provenance.
     """
     directory = Path(directory).expanduser().resolve()
-    validate_epc_settings(mu_stars, imaginary_tolerance_cm1)
+    validate_epc_settings(mu_stars, imaginary_tolerance_cm1, imaginary_mode_policy)
     if broadenings_Ry is not None and (
         not len(broadenings_Ry)
         or any(not np.isfinite(v) or v <= 0 for v in broadenings_Ry)
@@ -789,6 +810,8 @@ def analyze_epc_directory(
         "phonon_dos": None,
         "instability": None,
         "imaginary_tolerance_cm1": float(imaginary_tolerance_cm1),
+        "imaginary_mode_policy": imaginary_mode_policy,
+        "phonon_stability": "unknown",
     }
     diagnostics = result["diagnostics"]
     for key, name, parser in [
@@ -805,6 +828,59 @@ def analyze_epc_directory(
                     "reason": str(exc),
                 }
             )
+    # Assess stability before any Tc formula can be evaluated. Missing data must
+    # remain distinguishable from an assessed grid without significant negatives.
+    frequencies = result["frequencies"]
+    if frequencies is not None:
+        with np.errstate(all="ignore"):
+            values = (
+                np.asarray(frequencies["frequencies"])
+                * _UNITS[frequencies["frequency_unit"]]
+                * _EV_CM
+            )
+        if not np.isfinite(values).all():
+            diagnostics.append(
+                {
+                    "component": "frequencies",
+                    "status": "frequency_conversion_unrepresentable",
+                }
+            )
+        else:
+            significant = values < -imaginary_tolerance_cm1
+            unstable = bool(significant.any())
+            result["phonon_stability"] = (
+                "unstable" if unstable else "no_sampled_instability"
+            )
+            negative_count = int(np.sum(values < 0))
+            significant_count = int(np.sum(significant))
+            result["instability"] = {
+                "minimum_frequency_cm1": float(values.min()),
+                "negative_frequency_count": negative_count,
+                "below_tolerance_count": significant_count,
+                "tolerated_negative_count": negative_count - significant_count,
+                "sampled_imaginary_modes": unstable,
+                "unstable_modes": [
+                    {
+                        "qpoint_index": int(q + 1),
+                        "mode_index": int(mode + 1),
+                        "qpoint": frequencies["qpoints"][q],
+                        "frequency_cm1": float(values[q, mode]),
+                    }
+                    for q, mode in np.argwhere(significant)
+                ],
+            }
+        for flag in frequencies["diagnostics"]:
+            diagnostics.append({"component": "frequencies", "status": flag})
+    stability_reason = (
+        "phonon_stability_unavailable"
+        if result["instability"] is None
+        else "sampled_phonon_instability"
+        if result["instability"]["sampled_imaginary_modes"]
+        else None
+    )
+    if stability_reason and imaginary_mode_policy == "raise":
+        raise ValueError(f"Phonon stability prevents Tc evaluation: {stability_reason}")
+    calculate_tc = imaginary_mode_policy == "warn" or stability_reason is None
     available: dict[int, list[Path]] = {}
     for path in directory.glob("a2F.dos*"):
         match = re.fullmatch(r"a2F\.dos([1-9]\d*)(?:\.gz)?", path.name)
@@ -870,7 +946,9 @@ def analyze_epc_directory(
             )
         else:
             try:
-                record.update(analyze_a2f(read_a2f(paths[0]), mu_stars))
+                record.update(
+                    analyze_a2f(read_a2f(paths[0]), mu_stars, calculate_tc=calculate_tc)
+                )
             except (OSError, ValueError, ArithmeticError, IndexError) as exc:
                 _invalidate(record, str(exc))
         if width is not None and qe_qsum and broadenings_Ry is not None:
@@ -908,6 +986,21 @@ def analyze_epc_directory(
                 diagnostics.append(
                     {"component": f"spectrum_{index}", "status": "qsum_match_missing"}
                 )
+        if stability_reason:
+            for tc in record["Tc"]:
+                tc.setdefault("warnings", []).append(
+                    "sampled_instability_QE_may_zero_imaginary_mode_gamma"
+                    if stability_reason == "sampled_phonon_instability"
+                    else stability_reason
+                )
+                if tc["status"] == "estimated":
+                    tc.update(status="diagnostic", reason=stability_reason)
+                elif tc["reason"] == "Tc_evaluation_disabled":
+                    tc["reason"] = stability_reason
+            if record["Tc"]:
+                record.setdefault("warnings", []).append(stability_reason)
+                if record["status"] == "analyzed":
+                    record["status"] = "analyzed_with_warnings"
         result["spectra"].append(record)
     if qe_qsum and broadenings_Ry is not None and len(matched_rows) < len(qe_qsum):
         diagnostics.append(
@@ -917,38 +1010,6 @@ def analyze_epc_directory(
                 "row_indices": sorted(set(range(len(qe_qsum))) - matched_rows),
             }
         )
-    frequencies = result["frequencies"]
-    if frequencies is not None:
-        with np.errstate(all="ignore"):
-            values = (
-                np.asarray(frequencies["frequencies"])
-                * _UNITS[frequencies["frequency_unit"]]
-                * _EV_CM
-            )
-        unstable = False
-        if not np.isfinite(values).all():
-            diagnostics.append(
-                {
-                    "component": "frequencies",
-                    "status": "frequency_conversion_unrepresentable",
-                }
-            )
-        else:
-            unstable = bool(np.any(values < -imaginary_tolerance_cm1))
-            result["instability"] = {
-                "minimum_frequency_cm1": float(values.min()),
-                "negative_frequency_count": int(np.sum(values < 0)),
-                "below_tolerance_count": int(np.sum(values < -imaginary_tolerance_cm1)),
-                "sampled_imaginary_modes": unstable,
-            }
-        for flag in frequencies["diagnostics"]:
-            diagnostics.append({"component": "frequencies", "status": flag})
-        if unstable:
-            for record in result["spectra"]:
-                for tc in record["Tc"]:
-                    tc.setdefault("warnings", []).append(
-                        "sampled_instability_QE_may_zero_imaginary_mode_gamma"
-                    )
     if result["phonon_dos"] is not None:
         dos = result["phonon_dos"]
         with np.errstate(all="ignore"):

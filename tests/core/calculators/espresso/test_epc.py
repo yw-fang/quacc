@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -518,6 +519,7 @@ def test_duplicate_output_is_a_component_diagnostic(tmp_path: Path, name: str) -
 
 
 def test_qsum_rows_are_matched_by_value(tmp_path: Path) -> None:
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n0 1 2\n")
     for i in [1, 2, 3]:
         (tmp_path / f"a2F.dos{i}").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
     (tmp_path / "lambda").write_text(
@@ -641,11 +643,128 @@ def test_instability_units_and_tc_warning(
     assert result["instability"]["minimum_frequency_cm1"] == pytest.approx(-20)
     assert result["status"] == "sampled_instability"
     assert "sampled_instability" in result["spectra"][0]["Tc"][0]["warnings"][0]
+    assert result["spectra"][0]["Tc"][0]["status"] == "diagnostic"
+    suppressed = epc.analyze_epc_directory(
+        tmp_path, broadenings_Ry=(0.0025,), imaginary_mode_policy="skip_tc"
+    )
+    assert all(tc["Tc_K"] is None for tc in suppressed["spectra"][0]["Tc"])
     native["frequencies"] = [[-1e308, 1e308, 0]]
     result = epc.analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025,))
     assert result["instability"] is None
     assert result["status"] == "incomplete_or_invalid"
+    assert result["spectra"][0]["Tc"][0]["reason"] == "phonon_stability_unavailable"
+    suppressed = epc.analyze_epc_directory(
+        tmp_path, broadenings_Ry=(0.0025,), imaginary_mode_policy="skip_tc"
+    )
+    assert all(tc["Tc_K"] is None for tc in suppressed["spectra"][0]["Tc"])
+    with pytest.raises(ValueError, match="phonon_stability_unavailable"):
+        epc.analyze_epc_directory(tmp_path, imaginary_mode_policy="raise")
     json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("frequency", [-20.0, -5.0, None])
+@pytest.mark.parametrize("policy", ["warn", "skip_tc", "raise"])
+def test_imaginary_mode_policies(
+    tmp_path: Path, frequency: float | None, policy: Literal["warn", "skip_tc", "raise"]
+) -> None:
+    """Distinguish significant, tolerated and unknown sampled instability."""
+    if frequency is not None:
+        (tmp_path / "matdyn.freq").write_text(
+            f" &plot nbnd=3, nks=1 /\n0.25 0 0\n{frequency} 1 2\n"
+        )
+    (tmp_path / "matdyn.dos").write_text("# cm^-1\n0 0\n1 2.25\n2 0\n")
+    (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
+    before = {p: p.read_bytes() for p in tmp_path.iterdir()}
+    limited = frequency is None or frequency < -10
+    reason = (
+        "phonon_stability_unavailable"
+        if frequency is None
+        else "sampled_phonon_instability"
+    )
+    if limited and policy == "raise":
+        with pytest.raises(ValueError, match=reason):
+            analyze_epc_directory(tmp_path, imaginary_mode_policy=policy)
+    else:
+        result = analyze_epc_directory(tmp_path, imaginary_mode_policy=policy)
+        spectrum = result["spectra"][0]
+        assert result["imaginary_mode_policy"] == policy
+        assert spectrum["lambda"] == pytest.approx(0.8)
+        assert spectrum["frequency"] == [1, 2, 3]
+        if limited:
+            for tc in spectrum["Tc"]:
+                assert tc["reason"] == reason
+                if policy == "warn":
+                    assert tc["status"] == "diagnostic"
+                    assert tc["Tc_K"] > 0
+                else:
+                    assert tc["status"] == "unavailable"
+                    assert tc["Tc_K"] is None
+                    assert "f1" not in tc
+                    assert "f2" not in tc
+        else:
+            assert result["phonon_stability"] == "no_sampled_instability"
+            assert result["instability"]["tolerated_negative_count"] == 1
+            assert all(tc["status"] == "estimated" for tc in spectrum["Tc"])
+        if frequency == -20:
+            assert result["phonon_stability"] == "unstable"
+            mode = result["instability"]["unstable_modes"][0]
+            assert (mode["qpoint_index"], mode["mode_index"]) == (1, 1)
+            assert mode["qpoint"] == [0.25, 0, 0]
+            assert mode["frequency_cm1"] == pytest.approx(-20)
+        elif frequency is None:
+            assert result["phonon_stability"] == "unknown"
+            assert result["instability"] is None
+            assert result["status"] == "incomplete_or_invalid"
+        json.dumps(result, allow_nan=False)
+    assert all(p.read_bytes() == data for p, data in before.items())
+
+
+def test_spectrum_moments_without_tc() -> None:
+    raw = read_a2f(DATA / "al" / "a2F.dos10.gz")
+    result = analyze_a2f(raw, calculate_tc=False)
+    assert result["lambda"] == pytest.approx(AL_MOMENTS["lambda"], rel=2e-7)
+    assert result["omega_log_K"] == pytest.approx(AL_MOMENTS["omega_log_K"], rel=2e-7)
+    assert all(
+        tc["Tc_K"] is None and tc["reason"] == "Tc_evaluation_disabled"
+        for tc in result["Tc"]
+    )
+    with pytest.raises(ValueError, match="Python boolean"):
+        analyze_a2f(raw, calculate_tc="false")  # type: ignore[arg-type]
+
+
+def test_invalid_imaginary_mode_policy(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="imaginary_mode_policy"):
+        analyze_epc_directory(tmp_path, imaginary_mode_policy="ignore")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("policy", ["warn", "skip_tc"])
+def test_instability_cannot_restore_invalid_tc(
+    tmp_path: Path, policy: Literal["warn", "skip_tc"]
+) -> None:
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-20 1 2\n")
+    (tmp_path / "a2F.dos1").write_text("# Ry\n1 -1\n2 -1\n3 -1\nlambda = -3\n")
+    result = analyze_epc_directory(tmp_path, imaginary_mode_policy=policy)
+    assert all(
+        tc["Tc_K"] is None
+        and tc["status"] == "unavailable"
+        and tc["reason"] == "nonpositive_or_nonfinite_lambda"
+        for tc in result["spectra"][0]["Tc"]
+    )
+
+
+def test_strict_policy_precedes_spectral_evaluation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quacc.calculators.espresso import epc
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("Spectrum evaluated before the strict instability check")
+
+    monkeypatch.setattr(epc, "analyze_a2f", forbidden)
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-20 1 2\n")
+    (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\n")
+    with pytest.raises(ValueError, match="sampled_phonon_instability"):
+        epc.analyze_epc_directory(tmp_path, imaginary_mode_policy="raise")
 
 
 def test_qe_midpoint_anchor_is_distinct_from_positive_simpson(tmp_path: Path) -> None:
