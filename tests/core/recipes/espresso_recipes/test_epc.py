@@ -116,6 +116,7 @@ def test_epc_flow_staging_and_customization(
         source,
         mu_stars=(0.13,),
         imaginary_mode_policy=policy,
+        gamma_imaginary_tolerance_cm1=30.0,
         job_params={
             "q2r_job": {"input_data": {"input": {"fildyn": "custom.dyn"}}},
             "matdyn_job": {"input_data": {"input": {"nk1": 6}}},
@@ -129,6 +130,7 @@ def test_epc_flow_staging_and_customization(
     assert [s["lambda"] for s in result["spectra"]] == pytest.approx([0.8, 1.6])
     assert result["mu_stars"] == [0.13]
     assert result["imaginary_mode_policy"] == policy
+    assert result["gamma_imaginary_tolerance_cm1"] == 30.0
     assert "6" in result["settings"]["matdyn"]
     assert result["status"] == "analyzed"
     assert result["input_provenance"]["DFPT"]["qmesh"] == [1, 1, 1]
@@ -255,7 +257,7 @@ def test_native_pb_epc_postprocess(tmp_path: Path, compressed_source: bool) -> N
     "kwargs",
     [
         {"mu_stars": (-0.1,)},
-        {"imaginary_tolerance_cm1": -1},
+        {"gamma_imaginary_tolerance_cm1": -1},
         {"imaginary_mode_policy": "ignore"},
         {"job_params": {"epc_analysis_job": {"imaginary_mode_policy": "ignore"}}},
         {"job_params": {"all": {"input_data": {}}}},
@@ -276,7 +278,7 @@ def test_flow_settings_fail_before_solver_calls(
         if "mu_stars" in kwargs
         or "mu_stars" in kwargs.get("job_params", {}).get("epc_analysis_job", {})
         else "Imaginary-frequency"
-        if "imaginary_tolerance_cm1" in kwargs
+        if "gamma_imaginary_tolerance_cm1" in kwargs
         else "imaginary_mode_policy"
         if "imaginary_mode_policy" in kwargs
         or "imaginary_mode_policy"

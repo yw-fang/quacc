@@ -44,7 +44,10 @@ if TYPE_CHECKING:
 
     def check_epc_api(source: Path, q2r: RunSchema, matdyn: RunSchema) -> None:
         output = epc_postprocess_flow(
-            source, mu_stars=(0.1,), imaginary_mode_policy="skip_tc"
+            source,
+            mu_stars=(0.1,),
+            imaginary_mode_policy="skip_tc",
+            gamma_imaginary_tolerance_cm1=45.0,
         )
         assert_type(output, EspressoEPCSchema)
         assert_type(output["epc_results"], EPCResultSchema)

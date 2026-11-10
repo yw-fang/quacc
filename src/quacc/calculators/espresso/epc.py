@@ -299,7 +299,7 @@ def read_phonon_dos(
 
 def validate_epc_settings(
     mu_stars: Sequence[float],
-    imaginary_tolerance_cm1: float = 10.0,
+    gamma_imaginary_tolerance_cm1: float = 45.0,
     imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> None:
     """Validate inexpensive analysis settings before scheduling solver jobs.
@@ -308,15 +308,19 @@ def validate_epc_settings(
     ----------
     mu_stars
         Nonempty sequence of finite, nonnegative Coulomb pseudopotentials.
-    imaginary_tolerance_cm1
-        Finite, nonnegative numerical instability threshold.
+    gamma_imaginary_tolerance_cm1
+        Finite, nonnegative Gamma-only tolerance. Up to three modes strictly
+        between its negative value and zero may be tolerated at Gamma.
     imaginary_mode_policy
         Retain diagnostic Tc, suppress Tc, or raise for sampled instability or
         unavailable phonon stability information.
     """
     if not len(mu_stars) or any(not np.isfinite(mu) or mu < 0 for mu in mu_stars):
         raise ValueError("mu_stars must be finite nonnegative values")
-    if not np.isfinite(imaginary_tolerance_cm1) or imaginary_tolerance_cm1 < 0:
+    if (
+        not np.isfinite(gamma_imaginary_tolerance_cm1)
+        or gamma_imaginary_tolerance_cm1 < 0
+    ):
         raise ValueError("Imaginary-frequency tolerance must be finite and nonnegative")
     if imaginary_mode_policy not in ("warn", "skip_tc", "raise"):
         raise ValueError("imaginary_mode_policy must be 'warn', 'skip_tc', or 'raise'")
@@ -764,7 +768,7 @@ def analyze_epc_directory(
     directory: str | Path,
     mu_stars: Sequence[float] = (0.10,),
     broadenings_Ry: Sequence[float] | None = None,
-    imaginary_tolerance_cm1: float = 10.0,
+    gamma_imaginary_tolerance_cm1: float = 45.0,
     imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> EPCResultSchema:
     """Analyze completed matdyn files with broadening-resolved diagnostics.
@@ -778,8 +782,9 @@ def analyze_epc_directory(
     broadenings_Ry
         Ordered full-precision widths from the EPC input manifest. When absent,
         identities remain unknown; the rounded lambda table cannot supply them.
-    imaginary_tolerance_cm1
-        Numerical sampled-instability threshold, not a physical stability proof.
+    gamma_imaginary_tolerance_cm1
+        At q=(0,0,0), tolerate up to three modes strictly between its negative
+        value and zero. Other negative modes trigger the policy. Default 45 cm^-1.
     imaginary_mode_policy
         For sampled imaginary modes or unavailable frequency information, "warn"
         retains finite Tc with diagnostic status, "skip_tc" omits formula
@@ -792,7 +797,9 @@ def analyze_epc_directory(
         aggregate diagnostics, native units and source-file provenance.
     """
     directory = Path(directory).expanduser().resolve()
-    validate_epc_settings(mu_stars, imaginary_tolerance_cm1, imaginary_mode_policy)
+    validate_epc_settings(
+        mu_stars, gamma_imaginary_tolerance_cm1, imaginary_mode_policy
+    )
     if broadenings_Ry is not None and (
         not len(broadenings_Ry)
         or any(not np.isfinite(v) or v <= 0 for v in broadenings_Ry)
@@ -809,7 +816,7 @@ def analyze_epc_directory(
         "frequencies": None,
         "phonon_dos": None,
         "instability": None,
-        "imaginary_tolerance_cm1": float(imaginary_tolerance_cm1),
+        "gamma_imaginary_tolerance_cm1": float(gamma_imaginary_tolerance_cm1),
         "imaginary_mode_policy": imaginary_mode_policy,
         "phonon_stability": "unknown",
     }
@@ -833,11 +840,12 @@ def analyze_epc_directory(
     frequencies = result["frequencies"]
     if frequencies is not None:
         with np.errstate(all="ignore"):
-            values = (
-                np.asarray(frequencies["frequencies"])
-                * _UNITS[frequencies["frequency_unit"]]
-                * _EV_CM
+            factor = (
+                1.0
+                if frequencies["frequency_unit"] == "cm^-1"
+                else _UNITS[frequencies["frequency_unit"]] * _EV_CM
             )
+            values = np.asarray(frequencies["frequencies"]) * factor
         if not np.isfinite(values).all():
             diagnostics.append(
                 {
@@ -846,27 +854,54 @@ def analyze_epc_directory(
                 }
             )
         else:
-            significant = values < -imaginary_tolerance_cm1
-            unstable = bool(significant.any())
+            negative = values < 0
+            tolerated = np.zeros_like(negative)
+            for q, point in enumerate(frequencies["qpoints"]):
+                # Native coordinates are Cartesian; integer coordinates must not
+                # be reduced modulo a reciprocal lattice that is not available.
+                if np.all(np.asarray(point) == 0):
+                    eligible = np.flatnonzero(
+                        negative[q]
+                        & (values[q] > -gamma_imaginary_tolerance_cm1)
+                        & ~np.isclose(
+                            values[q],
+                            -gamma_imaginary_tolerance_cm1,
+                            rtol=1e-12,
+                            atol=0,
+                        )
+                    )
+                    # The three closest-to-zero modes are exempted for metadata
+                    # bookkeeping; the counted instability matches the Gamma
+                    # allowance independently of which eligible modes are chosen.
+                    order = np.argsort(abs(values[q, eligible]), kind="stable")
+                    tolerated[q, eligible[order[:3]]] = True
+            untolerated = negative & ~tolerated
+            unstable = bool(untolerated.any())
             result["phonon_stability"] = (
                 "unstable" if unstable else "no_sampled_instability"
             )
-            negative_count = int(np.sum(values < 0))
-            significant_count = int(np.sum(significant))
+            negative_count = int(np.sum(negative))
+            untolerated_count = int(np.sum(untolerated))
+            negative_modes = [
+                {
+                    "qpoint_index": int(q + 1),
+                    "mode_index": int(mode + 1),
+                    "qpoint": frequencies["qpoints"][q],
+                    "frequency_cm1": float(values[q, mode]),
+                    "tolerated_at_gamma": bool(tolerated[q, mode]),
+                }
+                for q, mode in np.argwhere(negative)
+            ]
             result["instability"] = {
+                "criterion": "gamma_aware",
                 "minimum_frequency_cm1": float(values.min()),
                 "negative_frequency_count": negative_count,
-                "below_tolerance_count": significant_count,
-                "tolerated_negative_count": negative_count - significant_count,
+                "untolerated_negative_count": untolerated_count,
+                "tolerated_negative_count": negative_count - untolerated_count,
                 "sampled_imaginary_modes": unstable,
+                "negative_modes": negative_modes,
                 "unstable_modes": [
-                    {
-                        "qpoint_index": int(q + 1),
-                        "mode_index": int(mode + 1),
-                        "qpoint": frequencies["qpoints"][q],
-                        "frequency_cm1": float(values[q, mode]),
-                    }
-                    for q, mode in np.argwhere(significant)
+                    mode for mode in negative_modes if not mode["tolerated_at_gamma"]
                 ],
             }
         for flag in frequencies["diagnostics"]:

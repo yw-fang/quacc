@@ -33,7 +33,7 @@ def epc_analysis_job(
     q2r_results: RunSchema,
     matdyn_results: RunSchema,
     mu_stars: tuple[float, ...] = (0.10,),
-    imaginary_tolerance_cm1: float = 10.0,
+    gamma_imaginary_tolerance_cm1: float = 45.0,
     *,
     imaginary_mode_policy: Literal["warn", "skip_tc", "raise"] = "warn",
 ) -> EPCResultSchema:
@@ -47,8 +47,9 @@ def epc_analysis_job(
         matdyn_job result with the completed spectral output directory.
     mu_stars
         Explicit Coulomb pseudopotentials for both formula-based Tc estimates.
-    imaginary_tolerance_cm1
-        Numerical threshold for sampled imaginary-mode diagnostics.
+    gamma_imaginary_tolerance_cm1
+        At Gamma, tolerate up to three modes strictly between its negative value
+        and zero (default 45 cm^-1). All remaining negative modes are flagged.
     imaginary_mode_policy
         "warn" retains diagnostic Tc for sampled instability or unknown stability;
         "skip_tc" suppresses Tc; "raise" raises ValueError before Tc evaluation.
@@ -67,7 +68,7 @@ def epc_analysis_job(
         matdyn_data["dir_name"],
         mu_stars=mu_stars,
         broadenings_Ry=source.get("broadenings_Ry"),
-        imaginary_tolerance_cm1=imaginary_tolerance_cm1,
+        gamma_imaginary_tolerance_cm1=gamma_imaginary_tolerance_cm1,
         imaginary_mode_policy=imaginary_mode_policy,
     )
     result["settings"] = {}
@@ -97,7 +98,7 @@ def epc_analysis_job(
 def epc_postprocess_flow(
     source_directory: SourceDirectory,
     mu_stars: tuple[float, ...] = (0.10,),
-    imaginary_tolerance_cm1: float = 10.0,
+    gamma_imaginary_tolerance_cm1: float = 45.0,
     job_params: dict[str, Any] | None = None,
     job_decorators: dict[str, Callable | None] | None = None,
     *,
@@ -118,8 +119,9 @@ def epc_postprocess_flow(
         fildyn input. All needed files are validated and staged internally.
     mu_stars
         Coulomb pseudopotentials; results retain every broadening, not a best Tc.
-    imaginary_tolerance_cm1
-        Numerical instability threshold; does not establish physical stability.
+    gamma_imaginary_tolerance_cm1
+        At Gamma, tolerate up to three modes strictly between its negative value
+        and zero (default 45 cm^-1). All remaining negative modes are flagged.
     imaginary_mode_policy
         "warn" retains diagnostic Tc for sampled instability or unknown stability;
         "skip_tc" retains spectra/moments without evaluating Tc; "raise" raises
@@ -147,7 +149,9 @@ def epc_postprocess_flow(
         raise ValueError(
             "EPC flow job_params['all'] is unsupported; customize named jobs"
         )
-    validate_epc_settings(mu_stars, imaginary_tolerance_cm1, imaginary_mode_policy)
+    validate_epc_settings(
+        mu_stars, gamma_imaginary_tolerance_cm1, imaginary_mode_policy
+    )
 
     defaults: dict[str, dict[str, Any]] = {
         "q2r_job": {"input_data": {"input": {"la2f": True, "zasr": "simple"}}},
@@ -165,7 +169,7 @@ def epc_postprocess_flow(
         },
         "epc_analysis_job": {
             "mu_stars": mu_stars,
-            "imaginary_tolerance_cm1": imaginary_tolerance_cm1,
+            "gamma_imaginary_tolerance_cm1": gamma_imaginary_tolerance_cm1,
             "imaginary_mode_policy": imaginary_mode_policy,
         },
     }
@@ -173,7 +177,7 @@ def epc_postprocess_flow(
     analysis_settings = effective["epc_analysis_job"]
     validate_epc_settings(
         analysis_settings["mu_stars"],
-        analysis_settings["imaginary_tolerance_cm1"],
+        analysis_settings["gamma_imaginary_tolerance_cm1"],
         analysis_settings["imaginary_mode_policy"],
     )
     for name in ("q2r_job", "matdyn_job"):

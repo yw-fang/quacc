@@ -42,8 +42,8 @@ are flagged, not silently clipped or rejected. A negative lambda fraction below
 
 ## Imaginary phonons and diagnostic Tc
 
-The `imaginary_mode_policy` option controls Tc evaluation when the sampled
-frequencies contain significant imaginary modes or cannot be assessed:
+The `imaginary_mode_policy` option controls Tc evaluation when sampled imaginary
+modes remain after the Gamma-point allowance, or stability cannot be assessed:
 
 | Policy | Behaviour |
 | --- | --- |
@@ -57,7 +57,7 @@ For example, to suppress Tc for imaginary or unassessed phonons:
 output = epc_postprocess_flow(
     "/path/to/completed/dfpt",
     imaginary_mode_policy="skip_tc",
-    imaginary_tolerance_cm1=10.0,
+    gamma_imaginary_tolerance_cm1=45.0,
 )
 ```
 
@@ -65,18 +65,30 @@ The same option is available on `epc_analysis_job` and `analyze_epc_directory`,
 and can be customized through `job_params["epc_analysis_job"]`. Unsupported
 policies are rejected before scheduling solver jobs.
 
-The criterion is a frequency below `-imaginary_tolerance_cm1` anywhere in the
-supplied matdyn sampling, after conversion to cm⁻¹. The default tolerance is
-10 cm⁻¹ for all q points, with no separate Gamma-point exemption. Negative
-frequencies within the tolerance remain recorded. This numerical tolerance is
-configurable; it is not a universal physical stability criterion.
+The criterion is Gamma-aware, after conversion to cm⁻¹:
+
+- At Gamma, up to three negative modes strictly between
+  `-gamma_imaginary_tolerance_cm1` and zero are tolerated. The default allowance
+  is 45 cm⁻¹. A mode at −45 cm⁻¹ or more negative is not exempted; endpoint
+  roundoff from unit conversion is handled explicitly.
+- If more than three Gamma modes meet that condition, the excess still triggers
+  the policy. For reproducible bookkeeping, the three closest to zero are marked
+  tolerated. This count-based heuristic does not identify acoustic eigenvectors.
+- Every negative frequency away from Gamma triggers the policy, regardless of
+  its magnitude. There is no uniform non-Gamma tolerance.
+
+Gamma is identified as q=(0,0,0) in the parsed Cartesian coordinates, not by
+reducing coordinates modulo integers. A nonzero point near Gamma is not exempted.
+Every negative mode, including tolerated Gamma modes, remains recorded. The
+Gamma allowance is configurable; it is not a universal physical stability rule.
 
 `phonon_stability` distinguishes `"unstable"`, `"no_sampled_instability"` and
 `"unknown"`. Missing, unreadable or unrepresentable frequency data give unknown
-stability. The instability record retains the minimum frequency, negative and
-significant-mode counts, and significant modes with one-based q-point/mode
-indices and coordinates in the parsed frequency file's coordinate system.
-No sampled instability establishes only the result for that sampling.
+stability. The instability record retains the minimum frequency, negative,
+tolerated and untolerated counts, and all negative modes with one-based
+q-point/mode indices, coordinates and tolerance labels. `unstable_modes` contains
+the untolerated subset. Passing this sampled heuristic does not establish
+stability throughout the Brillouin zone.
 
 Diagnostic values can be retained for selecting subsequent anharmonic studies.
 They describe the supplied positive-frequency spectral data; QE may have zeroed

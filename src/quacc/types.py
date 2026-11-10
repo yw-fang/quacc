@@ -787,7 +787,7 @@ if TYPE_CHECKING:
         frequencies: dict[str, Any] | None
         phonon_dos: dict[str, Any] | None
         instability: dict[str, Any] | None
-        imaginary_tolerance_cm1: float
+        gamma_imaginary_tolerance_cm1: float
         imaginary_mode_policy: Literal["warn", "skip_tc", "raise"]
         phonon_stability: Literal["unknown", "unstable", "no_sampled_instability"]
         qe_qsum: list[dict[str, Any]]

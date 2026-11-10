@@ -182,13 +182,13 @@ def test_missing_and_unstable_outputs(tmp_path: Path) -> None:
     assert [r["status"] for r in out["spectra"]] == ["unavailable", "unavailable"]
     (tmp_path / "matdyn.dos").write_text("# Frequency[cm^-1] DOS\n0 0\n1 1\n2 0\n")
     (tmp_path / "a2F.dos1").write_text("# Ry\n1 0.2\n2 0.4\n3 0.6\n")
-    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0 1\n-20 1 2\n")
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0 1\n-50 1 2\n")
     partial = analyze_epc_directory(tmp_path, broadenings_Ry=(0.005, 0.01))
     assert partial["status"] == "incomplete_or_invalid"
     assert partial["spectra"][1]["status"] == "unavailable"
     out = analyze_epc_directory(tmp_path, broadenings_Ry=(0.005,))
     assert out["status"] == "sampled_instability"
-    assert out["instability"]["below_tolerance_count"] == 1
+    assert out["instability"]["untolerated_negative_count"] == 1
     json.dumps(out, allow_nan=False)
 
 
@@ -380,8 +380,8 @@ def test_broadening_series_diagnostics(tmp_path: Path) -> None:
         {"mu_stars": (-0.1,)},
         {"broadenings_Ry": ()},
         {"broadenings_Ry": (float("inf"),)},
-        {"imaginary_tolerance_cm1": -1},
-        {"imaginary_tolerance_cm1": float("nan")},
+        {"gamma_imaginary_tolerance_cm1": -1},
+        {"gamma_imaginary_tolerance_cm1": float("nan")},
     ],
 )
 def test_invalid_analysis_settings(tmp_path: Path, kwargs: dict) -> None:
@@ -629,7 +629,7 @@ def test_instability_units_and_tc_warning(
 ) -> None:
     from quacc.calculators.espresso import epc
 
-    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-20 1 2\n")
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-50 1 2\n")
     (tmp_path / "matdyn.dos").write_text("# cm^-1\n0 0\n1 2.25\n2 0\n")
     (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
     native = epc.read_matdyn_frequencies(tmp_path / "matdyn.freq")
@@ -640,7 +640,7 @@ def test_instability_units_and_tc_warning(
     )
     monkeypatch.setattr(epc, "read_matdyn_frequencies", lambda _: native)
     result = epc.analyze_epc_directory(tmp_path, broadenings_Ry=(0.0025,))
-    assert result["instability"]["minimum_frequency_cm1"] == pytest.approx(-20)
+    assert result["instability"]["minimum_frequency_cm1"] == pytest.approx(-50)
     assert result["status"] == "sampled_instability"
     assert "sampled_instability" in result["spectra"][0]["Tc"][0]["warnings"][0]
     assert result["spectra"][0]["Tc"][0]["status"] == "diagnostic"
@@ -662,20 +662,21 @@ def test_instability_units_and_tc_warning(
     json.dumps(result, allow_nan=False)
 
 
-@pytest.mark.parametrize("frequency", [-20.0, -5.0, None])
+@pytest.mark.parametrize("frequency", [-5.0, -20.0, None])
 @pytest.mark.parametrize("policy", ["warn", "skip_tc", "raise"])
 def test_imaginary_mode_policies(
     tmp_path: Path, frequency: float | None, policy: Literal["warn", "skip_tc", "raise"]
 ) -> None:
-    """Distinguish significant, tolerated and unknown sampled instability."""
+    """Distinguish non-Gamma instability, tolerated Gamma modes and unknown data."""
     if frequency is not None:
+        point = "0 0 0" if frequency == -20 else "0.25 0 0"
         (tmp_path / "matdyn.freq").write_text(
-            f" &plot nbnd=3, nks=1 /\n0.25 0 0\n{frequency} 1 2\n"
+            f" &plot nbnd=3, nks=1 /\n{point}\n{frequency} 1 2\n"
         )
     (tmp_path / "matdyn.dos").write_text("# cm^-1\n0 0\n1 2.25\n2 0\n")
     (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
     before = {p: p.read_bytes() for p in tmp_path.iterdir()}
-    limited = frequency is None or frequency < -10
+    limited = frequency != -20
     reason = (
         "phonon_stability_unavailable"
         if frequency is None
@@ -705,18 +706,107 @@ def test_imaginary_mode_policies(
             assert result["phonon_stability"] == "no_sampled_instability"
             assert result["instability"]["tolerated_negative_count"] == 1
             assert all(tc["status"] == "estimated" for tc in spectrum["Tc"])
-        if frequency == -20:
+        if frequency == -5:
             assert result["phonon_stability"] == "unstable"
             mode = result["instability"]["unstable_modes"][0]
             assert (mode["qpoint_index"], mode["mode_index"]) == (1, 1)
             assert mode["qpoint"] == [0.25, 0, 0]
-            assert mode["frequency_cm1"] == pytest.approx(-20)
+            assert mode["frequency_cm1"] == pytest.approx(-5)
         elif frequency is None:
             assert result["phonon_stability"] == "unknown"
             assert result["instability"] is None
             assert result["status"] == "incomplete_or_invalid"
         json.dumps(result, allow_nan=False)
     assert all(p.read_bytes() == data for p, data in before.items())
+
+
+@pytest.mark.parametrize(
+    ("point", "modes", "tolerance", "untolerated", "tolerated"),
+    [
+        ([0, 0, 0], [-44.9999, -20, -0.1, 1, 2, 3], 45, 0, 3),
+        ([0, 0, 0], [-45, 0, 1], 45, 1, 0),
+        ([0, 0, 0], [-50, 0, 1], 45, 1, 0),
+        ([0, 0, 0], [-40, -30, -20, -10, 1, 2], 45, 1, 3),
+        ([0, 0, 0], [-50, -40, -30, -20, -10, 1], 45, 2, 3),
+        ([0.25, 0, 0], [-0.0001, 0, 1], 45, 1, 0),
+        ([0.000001, 0, 0], [-0.0001, 0, 1], 45, 1, 0),
+        ([1, 0, 0], [-0.0001, 0, 1], 45, 1, 0),
+        ([0, 0, 0], [-0.1, 0, 1], 0, 1, 0),
+        ([0, 0, 0], [-35, 0, 1], 30, 1, 0),
+    ],
+)
+def test_gamma_allowance_boundaries(
+    tmp_path: Path,
+    point: list[float],
+    modes: list[float],
+    tolerance: float,
+    untolerated: int,
+    tolerated: int,
+) -> None:
+    """Count excess/strong Gamma modes and every negative non-Gamma mode."""
+    (tmp_path / "matdyn.freq").write_text(
+        f" &plot nbnd={len(modes)}, nks=1 /\n"
+        + " ".join(map(str, point))
+        + "\n"
+        + " ".join(map(str, modes))
+        + "\n"
+    )
+    (tmp_path / "matdyn.dos").write_text(f"# cm^-1\n0 0\n1 {0.75 * len(modes)}\n2 0\n")
+    (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\nlambda = .8\n")
+    result = analyze_epc_directory(
+        tmp_path,
+        gamma_imaginary_tolerance_cm1=tolerance,
+        imaginary_mode_policy="skip_tc",
+    )
+    info = result["instability"]
+    assert info["criterion"] == "gamma_aware"
+    assert info["negative_frequency_count"] == untolerated + tolerated
+    assert info["untolerated_negative_count"] == untolerated
+    assert info["tolerated_negative_count"] == tolerated
+    assert len(info["negative_modes"]) == untolerated + tolerated
+    assert len(info["unstable_modes"]) == untolerated
+    assert result["frequencies"]["frequencies"][0] == modes
+    assert all(
+        tc["Tc_K"] is None if untolerated else tc["status"] == "estimated"
+        for tc in result["spectra"][0]["Tc"]
+    )
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("unit", ["eV", "meV", "Ry"])
+def test_gamma_limit_after_frequency_conversion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unit: str
+) -> None:
+    """A mode exactly at the Gamma limit remains untolerated after conversion."""
+    from quacc.calculators.espresso import epc
+
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-45 0 1\n")
+    parsed = read_matdyn_frequencies(tmp_path / "matdyn.freq")
+    cm_per_ev = physical_constants["electron volt-inverse meter relationship"][0] / 100
+    unit_ev = {
+        "eV": 1,
+        "meV": 0.001,
+        "Ry": physical_constants["Rydberg constant times hc in eV"][0],
+    }[unit]
+    parsed.update(
+        frequency_unit=unit,
+        frequencies=(np.array(parsed["frequencies"]) / cm_per_ev / unit_ev).tolist(),
+    )
+    monkeypatch.setattr(epc, "read_matdyn_frequencies", lambda _: parsed)
+    result = epc.analyze_epc_directory(tmp_path)
+    assert result["instability"]["untolerated_negative_count"] == 1
+    assert result["instability"]["tolerated_negative_count"] == 0
+
+
+def test_gamma_allowance_is_per_qpoint(tmp_path: Path) -> None:
+    (tmp_path / "matdyn.freq").write_text(
+        " &plot nbnd=3, nks=3 /\n0 0 0\n-3 -2 -1\n0.25 0 0\n-0.1 1 2\n0 0 0\n-3 -2 -1\n"
+    )
+    result = analyze_epc_directory(tmp_path)
+    assert result["instability"]["negative_frequency_count"] == 7
+    assert result["instability"]["tolerated_negative_count"] == 6
+    assert result["instability"]["untolerated_negative_count"] == 1
+    assert result["instability"]["unstable_modes"][0]["qpoint_index"] == 2
 
 
 def test_spectrum_moments_without_tc() -> None:
@@ -741,7 +831,7 @@ def test_invalid_imaginary_mode_policy(tmp_path: Path) -> None:
 def test_instability_cannot_restore_invalid_tc(
     tmp_path: Path, policy: Literal["warn", "skip_tc"]
 ) -> None:
-    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-20 1 2\n")
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-50 1 2\n")
     (tmp_path / "a2F.dos1").write_text("# Ry\n1 -1\n2 -1\n3 -1\nlambda = -3\n")
     result = analyze_epc_directory(tmp_path, imaginary_mode_policy=policy)
     assert all(
@@ -761,7 +851,7 @@ def test_strict_policy_precedes_spectral_evaluation(
         pytest.fail("Spectrum evaluated before the strict instability check")
 
     monkeypatch.setattr(epc, "analyze_a2f", forbidden)
-    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-20 1 2\n")
+    (tmp_path / "matdyn.freq").write_text(" &plot nbnd=3, nks=1 /\n0 0 0\n-50 1 2\n")
     (tmp_path / "a2F.dos1").write_text("# Ry\n1 .2\n2 .4\n3 .6\n")
     with pytest.raises(ValueError, match="sampled_phonon_instability"):
         epc.analyze_epc_directory(tmp_path, imaginary_mode_policy="raise")
