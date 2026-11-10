@@ -20,21 +20,36 @@ from quacc.calculators.espresso.epc import (
 )
 
 DATA = Path(__file__).parent / "epc_data"
+PB = DATA / "pb"
+
+# Independent reference values from hyllios/utils autoph/allen_dynes.py
+# (commit 4e86e82ae2eec3762f66e6228a70f67b69570789); see epc_data/README.md.
+# The 2e-7 relative tolerance locks the same algorithm; it is not an accuracy bound.
+PB_MOMENTS = {
+    "lambda": 7.875436476796867,
+    "omega_log_K": 64.2876372164752,
+    "omega_2_K": 68.04225513743206,
+}
+PB_TC_K = {  # mu* -> (modified McMillan, Allen-Dynes)
+    0.10: (15.095127126096326, 26.241952273952318),
+    0.13: (14.6279463102742, 24.626938176283097),
+    0.15: (14.311930611917951, 23.624487751414375),
+}
+AL_MOMENTS = {
+    "lambda": 0.3707535899829175,
+    "omega_log_K": 325.0235690931655,
+    "omega_2_K": 344.6259412608493,
+}
+AL_TC_K = (0.8588558676754687, 0.8697846981057307)  # mu* = 0.10
 
 
 def test_al_example03_spectrum_regression() -> None:
     """Official Al example covers weak coupling and signed mode columns."""
-    directory = DATA / "al_example03"
-    expected = json.loads((directory / "expected.json").read_text())
-    spectrum = analyze_a2f(
-        read_a2f(directory / "a2F.dos10.gz"), mu_stars=(expected["mu_star"],)
-    )
-    for key in ["lambda", "omega_log_K", "omega_2_K"]:
-        assert spectrum[key] == pytest.approx(expected[key], rel=2e-7)
-    for tc, field in zip(
-        spectrum["Tc"], ["McMillan_omega_log_K", "Allen_Dynes_K"], strict=True
-    ):
-        assert tc["Tc_K"] == pytest.approx(expected[field], rel=2e-7)
+    spectrum = analyze_a2f(read_a2f(DATA / "al" / "a2F.dos10.gz"), mu_stars=(0.10,))
+    for key, value in AL_MOMENTS.items():
+        assert spectrum[key] == pytest.approx(value, rel=2e-7)
+    for tc, value in zip(spectrum["Tc"], AL_TC_K, strict=True):
+        assert tc["Tc_K"] == pytest.approx(value, rel=2e-7)
         assert tc["status"] == "estimated"
     assert 0 < spectrum["lambda"] < 0.5
     assert np.shape(spectrum["alpha2F_modes"]) == (50, 3)
@@ -52,18 +67,11 @@ def test_al_example03_spectrum_regression() -> None:
 @pytest.mark.parametrize("mu_star", [0.10, 0.13, 0.15])
 def test_pb_spectrum_regression(mu_star: float) -> None:
     """One complete spectrum retains the physical quadrature regression."""
-    spectrum = analyze_a2f(read_a2f(DATA / "a2F.dos1.gz"), mu_stars=(mu_star,))
-    expected = next(
-        row
-        for row in json.loads((DATA / "expected.json").read_text())
-        if float(row["mu_star"]) == mu_star
-    )
-    for key in ["lambda", "omega_log_K", "omega_2_K"]:
-        assert spectrum[key] == pytest.approx(float(expected[key]), rel=2e-7)
-    for tc, field in zip(
-        spectrum["Tc"], ["McMillan_omega_log_K", "Allen_Dynes_K"], strict=True
-    ):
-        assert tc["Tc_K"] == pytest.approx(float(expected[field]), rel=2e-7)
+    spectrum = analyze_a2f(read_a2f(PB / "a2F.dos1.gz"), mu_stars=(mu_star,))
+    for key, value in PB_MOMENTS.items():
+        assert spectrum[key] == pytest.approx(value, rel=2e-7)
+    for tc, value in zip(spectrum["Tc"], PB_TC_K[mu_star], strict=True):
+        assert tc["Tc_K"] == pytest.approx(value, rel=2e-7)
         assert tc["status"] == "estimated"
         assert tc["mu_star"] == mu_star
     assert [tc["method"] for tc in spectrum["Tc"]] == [
@@ -84,19 +92,19 @@ def test_pb_spectrum_regression(mu_star: float) -> None:
 
 
 def test_native_frequency_and_dos_excerpts() -> None:
-    frequencies = read_matdyn_frequencies(DATA / "matdyn.freq")
+    frequencies = read_matdyn_frequencies(PB / "matdyn.freq")
     assert frequencies["number_of_modes"] == 3
     assert frequencies["number_of_qpoints"] == 2
     assert frequencies["weights"] == [0.001953, 0.015625]
     assert frequencies["frequencies"][0][-1] == 0.0
-    dos = read_phonon_dos(DATA / "matdyn.dos")
+    dos = read_phonon_dos(PB / "matdyn.dos")
     assert dos["frequency_unit"] == "cm^-1"
     assert np.shape(dos["atom_projected_dos"]) == (3, 1)
     assert dos["total_dos"][1] == pytest.approx(6.1326590894e-05)
 
 
 def test_frequency_units(tmp_path: Path) -> None:
-    raw = read_a2f(DATA / "a2F.dos1.gz")
+    raw = read_a2f(PB / "a2F.dos1.gz")
     baseline = analyze_a2f(raw)
     ry_ev = physical_constants["Rydberg constant times hc in eV"][0]
     for unit, multiplier in [
@@ -122,7 +130,7 @@ def test_frequency_units(tmp_path: Path) -> None:
         )
         assert out["omega_log_K"] == pytest.approx(baseline["omega_log_K"], rel=1e-12)
     with pytest.raises(ValueError, match="conflicts"):
-        read_a2f(DATA / "a2F.dos1.gz", frequency_unit="meV")
+        read_a2f(PB / "a2F.dos1.gz", frequency_unit="meV")
     f = tmp_path / "unknown"
     f.write_text("1 2\n2 3\n3 4\n")
     with pytest.raises(ValueError, match="unavailable"):
@@ -132,7 +140,7 @@ def test_frequency_units(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("value", [0, -1])
 def test_invalid_moments_not_zero_Tc(value: float) -> None:
-    raw = read_a2f(DATA / "a2F.dos1.gz")
+    raw = read_a2f(PB / "a2F.dos1.gz")
     raw["alpha2F"] = [value] * len(raw["frequency"])
     out = analyze_a2f(raw)
     assert out["status"] == "invalid"
@@ -142,7 +150,7 @@ def test_invalid_moments_not_zero_Tc(value: float) -> None:
 
 
 def test_formula_domain_and_large_lambda() -> None:
-    raw = read_a2f(DATA / "a2F.dos1.gz")
+    raw = read_a2f(PB / "a2F.dos1.gz")
     out = analyze_a2f(raw, mu_stars=(2.0,))
     assert all(
         r["Tc_K"] is None and r["reason"] == "nonpositive_formula_denominator"
@@ -298,7 +306,7 @@ def test_frequency_units_are_case_sensitive(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Unsupported"):
         read_a2f(f, frequency_unit="THz")
     with pytest.raises(ValueError, match="Unsupported"):
-        read_matdyn_frequencies(DATA / "matdyn.freq", frequency_unit="THz")
+        read_matdyn_frequencies(PB / "matdyn.freq", frequency_unit="THz")
 
 
 @pytest.mark.parametrize(

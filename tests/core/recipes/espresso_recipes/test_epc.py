@@ -14,12 +14,14 @@ from quacc.calculators.espresso.espresso import EspressoTemplate
 from quacc.recipes.espresso import epc, phonons
 from quacc.utils.files import copy_decompress_files
 
-DATA = Path(__file__).parents[2] / "calculators/espresso/epc_data"
+DATA_DIR = Path(__file__).parent / "data"
+# Saved Pb matdyn outputs shared with the offline parser tests.
+EPC_OUTPUTS = Path(__file__).parents[2] / "calculators/espresso/epc_data/pb"
 
 
 def test_analysis_without_plotting(monkeypatch: Any) -> None:
     monkeypatch.setitem(sys.modules, "matplotlib", None)
-    result = epc.epc_analysis_job({}, {"dir_name": str(DATA)})
+    result = epc.epc_analysis_job({}, {"dir_name": str(EPC_OUTPUTS)})
     assert sum("alpha2F" in spectrum for spectrum in result["spectra"]) == 1
     json.dumps(result, allow_nan=False)
 
@@ -184,9 +186,9 @@ def test_native_pb_epc_postprocess(tmp_path: Path, compressed_source: bool) -> N
         pytest.skip("QE q2r/matdyn not installed")
     source = tmp_path / "readonly_dfpt"
     if compressed_source:
-        copytree(DATA / "pb_dfpt", source)
+        copytree(DATA_DIR / "epc_test", source)
     else:
-        copy_decompress_files(DATA / "pb_dfpt", "*", source)
+        copy_decompress_files(DATA_DIR / "epc_test", "*", source)
     for p in source.glob("matdyn*"):
         p.rename(p.with_name(p.name.replace("matdyn", "pb.dyn", 1)))
     before = {
@@ -311,6 +313,6 @@ def test_epc_boolean_inputs_are_explicit(binary: str, data: dict) -> None:
 def test_broadening_count_conflict_fails_before_qe() -> None:
     with pytest.raises(ValueError, match="el_ph_nsigma disagrees"):
         phonons.q2r_job(
-            source_directory=DATA / "pb_dfpt",
+            source_directory=DATA_DIR / "epc_test",
             input_data={"input": {"la2f": True, "el_ph_nsigma": 10}},
         )
